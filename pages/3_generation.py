@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, GEN_DEFAULT_N, GEN_NOISE_STD, _make_rp_profile, _make_rs_profile
+from config import PAL, GEN_DEFAULT_N, GEN_NOISE_STD, MAX_METERS_UPLOAD, _make_rp_profile, _make_rs_profile
 from models.generator import CurveGenerator
 from utils.parser import parse_timeseries, parse_labels
 
@@ -40,7 +40,7 @@ def _plotly_base() -> dict:
 def _load_ts(file_bytes: bytes, file_name: str) -> pd.DataFrame:
     """Charge le CSV timeseries."""
     import io
-    return parse_timeseries(io.BytesIO(file_bytes))
+    return parse_timeseries(io.BytesIO(file_bytes), max_meters=MAX_METERS_UPLOAD)
 
 
 @st.cache_data
@@ -55,7 +55,7 @@ def _fit_generator(ts_key: str, lbl_key: str, ts_bytes: bytes | None, lbl_bytes:
     """Cree et entraine le generateur."""
     import io
     gen = CurveGenerator()
-    df = parse_timeseries(io.BytesIO(ts_bytes)) if ts_bytes else None
+    df = parse_timeseries(io.BytesIO(ts_bytes), max_meters=MAX_METERS_UPLOAD) if ts_bytes else None
     labels = parse_labels(io.BytesIO(lbl_bytes)) if lbl_bytes else None
     gen.fit(df, labels)
     return gen
@@ -101,6 +101,11 @@ ts_key = ts_file.name if ts_file else "none"
 lbl_key = lbl_file.name if lbl_file else "none"
 
 gen_df = _generate(ts_key, lbl_key, n_curves, curve_type, n_days, GEN_NOISE_STD, ts_bytes, lbl_bytes)
+
+if ts_bytes:
+    _ts_info = _load_ts(ts_bytes, ts_key)
+    n_meters = _ts_info["meter_id"].nunique()
+    st.caption(f"{n_meters} compteurs charges · {len(_ts_info):,} points")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Courbes", "Profils", "Comparaison", "Statistiques", "Export"])
 

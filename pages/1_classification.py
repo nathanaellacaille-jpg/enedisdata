@@ -9,7 +9,7 @@ import streamlit as st
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 
-from config import PAL, CLF_TEST_SIZE, _make_rp_profile, _make_rs_profile
+from config import PAL, CLF_TEST_SIZE, MAX_METERS_UPLOAD, _make_rp_profile, _make_rs_profile
 from models.classifier import EnergyClassifier
 from utils.features import extract_features
 from utils.parser import parse_timeseries, parse_labels
@@ -42,7 +42,7 @@ def _plotly_base() -> dict:
 def _load_ts(file_bytes: bytes, file_name: str) -> pd.DataFrame:
     """Charge et parse le CSV timeseries depuis les bytes."""
     import io
-    return parse_timeseries(io.BytesIO(file_bytes))
+    return parse_timeseries(io.BytesIO(file_bytes), max_meters=MAX_METERS_UPLOAD)
 
 
 @st.cache_data
@@ -89,6 +89,8 @@ with st.sidebar:
     if ts_file:
         try:
             df = _load_ts(ts_file.getvalue(), ts_file.name)
+            n_meters = df["meter_id"].nunique()
+            st.caption(f"{n_meters} compteurs charges · {len(df):,} points")
             meter_ids = sorted(df["meter_id"].unique().tolist())
             selected = st.selectbox("Compteur", meter_ids, key="clf_meter")
         except ValueError as e:
