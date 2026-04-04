@@ -13,6 +13,10 @@ class CurveGenerator:
             "RS": _make_rs_profile(),
         }
         self._scales = {"RP": 3.0, "RS": 1.2}  # kW amplitude reference
+        self.noise_std_by_slot = {
+            "RS": np.full(STEPS_PER_DAY, GEN_NOISE_STD),
+            "RP": np.full(STEPS_PER_DAY, GEN_NOISE_STD),
+        }
 
     def fit(self, df: pd.DataFrame, labels: dict | None) -> "CurveGenerator":
         """Calcule profils moyens par classe. Fallback sur profils de reference si labels=None."""
@@ -29,6 +33,14 @@ class CurveGenerator:
             if profile.max() > 0:
                 self._profiles[label_name] = profile / profile.max()
                 self._scales[label_name] = sub.groupby("slot")["kw"].mean().max()
+            # Calibration ecart-type par slot sur donnees reelles
+            pivot = sub.pivot_table(index="ts", columns="meter_id", values="kw")
+            pivot = pivot.copy()
+            pivot["slot"] = np.arange(len(pivot)) % STEPS_PER_DAY
+            slot_std = pivot.groupby("slot").std().mean(axis=1)
+            self.noise_std_by_slot[label_name] = (
+                slot_std.reindex(range(STEPS_PER_DAY), fill_value=GEN_NOISE_STD).values
+            )
         return self
 
     def generate(self, n: int, curve_type: str, n_days: int = 7, noise_std: float = GEN_NOISE_STD) -> pd.DataFrame:
@@ -41,11 +53,12 @@ class CurveGenerator:
                 ct = curve_type
             profile = self._profiles[ct]
             scale = self._scales[ct]
+            slot_stds = self.noise_std_by_slot[ct]
             for day in range(n_days):
                 # Variation journaliere
                 day_factor = 1.0 + np.random.normal(0, noise_std * 0.5)
                 for slot in range(STEPS_PER_DAY):
-                    noise = np.random.normal(0, noise_std)
+                    noise = np.random.normal(0, float(slot_stds[slot]))
                     kw = max(0.0, (profile[slot] + noise) * scale * day_factor)
                     records.append({
                         "curve_id": i,

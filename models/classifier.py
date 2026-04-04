@@ -34,18 +34,19 @@ class EnergyClassifier:
         """Probabilite d'etre RS (classe 1)."""
         return self._pipe.predict_proba(X.values)[:, 1]
 
-    def feature_importances(self, X: pd.DataFrame) -> pd.Series:
-        """Importances depliees depuis PCA vers features originales."""
-        clf = self._pipe.named_steps["clf"]
-        pca = self._pipe.named_steps["pca"]
-        # Importance de chaque composante PCA
-        comp_imp = clf.feature_importances_           # shape (n_components,)
-        # Decommposition : contribution de chaque feature originale via les vecteurs propres
-        components = pca.components_                  # shape (n_components, n_features)
-        feature_imp = np.abs(components).T @ comp_imp # shape (n_features,)
-        feature_imp /= feature_imp.sum() + 1e-12
-        names = self._feature_names or list(X.columns)
-        return pd.Series(feature_imp, index=names).sort_values(ascending=False)
+    def feature_importances(self, X: pd.DataFrame, y: np.ndarray) -> pd.Series:
+        """Permutation importance sur l'espace original (plus fiable que decomposition PCA)."""
+        from sklearn.inspection import permutation_importance
+        result = permutation_importance(
+            self._pipe, X, y,
+            n_repeats=10,
+            random_state=42,
+            scoring="f1_weighted",
+        )
+        return pd.Series(
+            result.importances_mean,
+            index=X.columns,
+        ).sort_values(ascending=False)
 
     def save(self, path: str) -> None:
         """Sauvegarde le modele via pickle."""

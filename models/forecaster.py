@@ -16,14 +16,14 @@ def make_lag_features(series: np.ndarray, n_lags: int) -> np.ndarray:
     return X
 
 
-def make_fourier_features(n: int, n_harmonics: int) -> np.ndarray:
-    """Features saisonnieres sin/cos pour n points et n_harmonics harmoniques."""
+def make_fourier_features(n: int, n_harmonics: int = 3, period: int = 48) -> np.ndarray:
+    """Features sin/cos a periode fixe (defaut 48 = journalier)."""
     t = np.arange(n)
-    feats = []
+    cols = []
     for k in range(1, n_harmonics + 1):
-        feats.append(np.sin(2 * np.pi * k * t / n))
-        feats.append(np.cos(2 * np.pi * k * t / n))
-    return np.column_stack(feats)
+        cols.append(np.sin(2 * np.pi * k * t / period))
+        cols.append(np.cos(2 * np.pi * k * t / period))
+    return np.column_stack(cols)
 
 
 class RidgeForecaster:
