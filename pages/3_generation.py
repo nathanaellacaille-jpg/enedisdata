@@ -24,7 +24,6 @@ def _plotly_base() -> dict:
         plot_bgcolor="white",
         paper_bgcolor="white",
         font=dict(family="Inter, sans-serif", size=12, color=PAL.TEXT),
-        margin=dict(l=16, r=16, t=32, b=16),
         legend=dict(
             orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
             font=dict(size=11), bgcolor="rgba(0,0,0,0)", borderwidth=0,
@@ -130,8 +129,8 @@ with tab1:
                 mode="lines", name=f"{ct}-{cid}",
                 line=dict(color=color, width=1.5, dash=dash),
             ))
-        fig.update_layout(**_plotly_base(), title=f"Courbes — jour {day_sel}", xaxis_title="Slot (30 min)", yaxis_title="kW")
-        st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title=f"Courbes — jour {day_sel}", xaxis_title="Slot (30 min)", yaxis_title="kW")
+        st.plotly_chart(fig, width="stretch")
     else:
         cols = 2
         rows_needed = (len(curves_to_show) + cols - 1) // cols
@@ -155,7 +154,7 @@ with tab1:
                     "height": 200,
                     "margin": dict(l=8, r=8, t=28, b=8),
                 })
-                row_cols[col_idx].plotly_chart(fig_g, use_container_width=True)
+                row_cols[col_idx].plotly_chart(fig_g, width="stretch")
 
 # ── Tab 2 : Profils ──────────────────────────────────────────────────────────
 with tab2:
@@ -173,8 +172,8 @@ with tab2:
         mode="lines", name="Profil RP",
         line=dict(color=PAL.RP, width=1.5, dash="dash"),
     ))
-    fig_prof.update_layout(**_plotly_base(), title="Profils moyens RS vs RP", xaxis_title="Slot (30 min)", yaxis_title="Puissance normalisee")
-    st.plotly_chart(fig_prof, use_container_width=True)
+    fig_prof.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Profils moyens RS vs RP", xaxis_title="Slot (30 min)", yaxis_title="Puissance normalisee")
+    st.plotly_chart(fig_prof, width="stretch")
 
     # Ratio WE/semaine par type
     gen_df_day = gen_df.copy()
@@ -190,8 +189,8 @@ with tab2:
             marker_color=[PAL.MULTI[0], PAL.MULTI[3]],
             width=0.4,
         ))
-        fig_ratio.update_layout(**_plotly_base(), title="Ratio WE/semaine par type", yaxis_title="Ratio")
-        st.plotly_chart(fig_ratio, use_container_width=True)
+        fig_ratio.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Ratio WE/semaine par type", yaxis_title="Ratio")
+        st.plotly_chart(fig_ratio, width="stretch")
 
 # ── Tab 3 : Comparaison ──────────────────────────────────────────────────────
 with tab3:
@@ -212,10 +211,12 @@ with tab3:
                 line=dict(color=PAL.REAL, width=1.5),
             ))
             fig_c.update_layout(
-                **_plotly_base(), title=label,
+                **_plotly_base(),
+                margin=dict(l=16, r=16, t=32, b=16),
+                title=label,
                 xaxis_title="Slot", yaxis_title="kW", height=250,
             )
-            col.plotly_chart(fig_c, use_container_width=True)
+            col.plotly_chart(fig_c, width="stretch")
 
         # Tableau stats
         stats = []
@@ -226,7 +227,7 @@ with tab3:
             ct = cdata["curve_type"].iloc[0] if not cdata.empty else "?"
             stats.append({"Courbe": label, "Type": ct, "Energie (kWh)": round(energy, 2),
                           "Pic (kW)": round(peak, 3), "Moy (kW)": round(mean_kw, 3)})
-        st.dataframe(pd.DataFrame(stats), use_container_width=True)
+        st.dataframe(pd.DataFrame(stats), width="stretch")
     else:
         st.caption("Au moins 2 courbes requises.")
 
@@ -240,8 +241,8 @@ with tab4:
         marker_color=PAL.MULTI[0],
         opacity=0.85,
     ))
-    fig_dist.update_layout(**_plotly_base(), title="Distribution energie journaliere (kWh)", xaxis_title="kWh/j", yaxis_title="Frequence")
-    st.plotly_chart(fig_dist, use_container_width=True)
+    fig_dist.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Distribution energie journaliere (kWh)", xaxis_title="kWh/j", yaxis_title="Frequence")
+    st.plotly_chart(fig_dist, width="stretch")
 
     # Heatmap puissance : slot x curve_id (premier jour)
     pivot_ids = sorted(gen_df["curve_id"].unique())[:n_viz]
@@ -256,15 +257,16 @@ with tab4:
     ))
     fig_heat.update_layout(
         **_plotly_base(),
+        margin=dict(l=16, r=16, t=32, b=16),
         title="Puissance par slot et courbe (jour 0)",
         xaxis_title="Courbe",
         yaxis_title="Slot (30 min)",
     )
-    st.plotly_chart(fig_heat, use_container_width=True)
+    st.plotly_chart(fig_heat, width="stretch")
 
 # ── Tab 5 : Export ────────────────────────────────────────────────────────────
 with tab5:
-    st.dataframe(gen_df.head(200), use_container_width=True)
+    st.dataframe(gen_df.head(200), width="stretch")
 
     csv_bytes = gen_df.to_csv(index=False).encode("utf-8")
     st.download_button("Telecharger CSV", csv_bytes, file_name="courbes_synthetiques.csv", mime="text/csv")

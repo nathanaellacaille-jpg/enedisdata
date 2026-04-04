@@ -26,7 +26,6 @@ def _plotly_base() -> dict:
         plot_bgcolor="white",
         paper_bgcolor="white",
         font=dict(family="Inter, sans-serif", size=12, color=PAL.TEXT),
-        margin=dict(l=16, r=16, t=32, b=16),
         legend=dict(
             orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
             font=dict(size=11), bgcolor="rgba(0,0,0,0)", borderwidth=0,
@@ -178,10 +177,11 @@ with tab1:
     ))
     fig.update_layout(
         **_plotly_base(),
+        margin=dict(l=16, r=16, t=32, b=16),
         title="Courbe de charge",
         yaxis_title="kW",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Jauge RS/RP
     if not proba_series.empty and selected in proba_series.index:
@@ -211,7 +211,7 @@ with tab1:
         )
         col_g, col_info = st.columns([1, 2])
         with col_g:
-            st.plotly_chart(fig_gauge, use_container_width=True)
+            st.plotly_chart(fig_gauge, width="stretch")
         with col_info:
             label_txt = "RS" if proba_rs >= 0.5 else "RP"
             st.metric("Classe predite", label_txt, delta_color="off")
@@ -242,8 +242,8 @@ with tab2:
             text=[f"{mid}<br>{lbl}" for mid, lbl in zip(features.index, labels_txt)],
             hovertemplate="%{text}<br>X=%{x:.3f}<br>Y=%{y:.3f}<extra></extra>",
         ))
-        fig2.update_layout(**_plotly_base(), xaxis_title=col_x, yaxis_title=col_y)
-        st.plotly_chart(fig2, use_container_width=True)
+        fig2.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), xaxis_title=col_x, yaxis_title=col_y)
+        st.plotly_chart(fig2, width="stretch")
 
         # Distribution predictions
         if clf is not None and not pred_series.empty:
@@ -254,8 +254,8 @@ with tab2:
                 marker_color=[PAL.MULTI[4], PAL.MULTI[0]],
                 width=0.4,
             ))
-            fig_dist.update_layout(**_plotly_base(), title="Distribution des classes predites", yaxis_title="Compteurs")
-            st.plotly_chart(fig_dist, use_container_width=True)
+            fig_dist.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Distribution des classes predites", yaxis_title="Compteurs")
+            st.plotly_chart(fig_dist, width="stretch")
 
         # Heatmap correlation
         corr = features.corr()
@@ -266,8 +266,8 @@ with tab2:
             colorscale=[[0, "#FFFFFF"], [0.5, "#94A3B8"], [1, "#0F172A"]],
             zmin=-1, zmax=1,
         ))
-        fig_corr.update_layout(**_plotly_base(), title="Correlation features")
-        st.plotly_chart(fig_corr, use_container_width=True)
+        fig_corr.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Correlation features")
+        st.plotly_chart(fig_corr, width="stretch")
 
 # ── Tab 3 : Explication ───────────────────────────────────────────────────────
 with tab3:
@@ -284,8 +284,8 @@ with tab3:
             marker_color=PAL.MULTI[0],
             width=0.5,
         ))
-        fig_imp.update_layout(**_plotly_base(), title="Top 5 features", xaxis_title="Importance")
-        st.plotly_chart(fig_imp, use_container_width=True)
+        fig_imp.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Top 5 features", xaxis_title="Importance")
+        st.plotly_chart(fig_imp, width="stretch")
 
         # Radar vs profil de reference
         rp_ref = _make_rp_profile()
@@ -312,11 +312,12 @@ with tab3:
         ))
         fig_radar.update_layout(
             **_plotly_base(),
+            margin=dict(l=16, r=16, t=32, b=16),
             title="Profil moyen vs references",
             xaxis_title="Slot (30 min)",
             yaxis_title="Puissance normalisee",
         )
-        st.plotly_chart(fig_radar, use_container_width=True)
+        st.plotly_chart(fig_radar, width="stretch")
 
 # ── Tab 4 : Performance ───────────────────────────────────────────────────────
 with tab4:
@@ -344,11 +345,12 @@ with tab4:
         ))
         fig_cm.update_layout(
             **_plotly_base(),
+            margin=dict(l=16, r=16, t=32, b=16),
             title="Matrice de confusion",
             xaxis_title="Predit",
             yaxis_title="Reel",
         )
-        st.plotly_chart(fig_cm, use_container_width=True)
+        st.plotly_chart(fig_cm, width="stretch")
 
 # ── Tab 5 : Export ────────────────────────────────────────────────────────────
 with tab5:
@@ -363,6 +365,6 @@ with tab5:
         if not proba_series.empty:
             export_df["proba_rs"] = proba_series.reindex(pred_series.index).values
 
-        st.dataframe(export_df, use_container_width=True)
+        st.dataframe(export_df, width="stretch")
         csv_bytes = export_df.to_csv(index=False).encode("utf-8")
         st.download_button("Telecharger CSV", csv_bytes, file_name="predictions.csv", mime="text/csv")
