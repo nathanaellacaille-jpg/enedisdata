@@ -24,7 +24,6 @@ def _plotly_base() -> dict:
         plot_bgcolor="white",
         paper_bgcolor="white",
         font=dict(family="Inter, sans-serif", size=12, color=PAL.TEXT),
-        margin=dict(l=16, r=16, t=32, b=16),
         legend=dict(
             orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
             font=dict(size=11), bgcolor="rgba(0,0,0,0)", borderwidth=0,
@@ -222,10 +221,11 @@ with tab1:
 
     fig.update_layout(
         **_plotly_base(),
+        margin=dict(l=16, r=16, t=32, b=16),
         title=f"Prevision 24h — {selected}",
         yaxis_title="kW",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 # ── Tab 2 : Analyse ───────────────────────────────────────────────────────────
 with tab2:
@@ -245,7 +245,7 @@ with tab2:
 
         metrics_df = pd.DataFrame(rows).set_index("Modele")
         metrics_df = metrics_df.round(4)
-        st.dataframe(metrics_df, use_container_width=True)
+        st.dataframe(metrics_df, width="stretch")
 
         best = metrics_df["MAE"].idxmin()
         st.caption(f"Meilleur modele selon MAE : {best}")
@@ -261,8 +261,8 @@ with tab3:
         orientation="h",
         marker_color=PAL.MULTI[0],
     ))
-    fig_coef.update_layout(**_plotly_base(), title="Top 20 coefficients Ridge", xaxis_title="Valeur")
-    st.plotly_chart(fig_coef, use_container_width=True)
+    fig_coef.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Top 20 coefficients Ridge", xaxis_title="Valeur")
+    st.plotly_chart(fig_coef, width="stretch")
 
     if arima is not None:
         st.markdown("**Resume ARIMA**")
@@ -276,8 +276,8 @@ with tab3:
             mode="lines",
             line=dict(color=PAL.LSTM, width=1.5),
         ))
-        fig_loss.update_layout(**_plotly_base(), title="Loss LSTM", xaxis_title="Epoch", yaxis_title="MSE")
-        st.plotly_chart(fig_loss, use_container_width=True)
+        fig_loss.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Loss LSTM", xaxis_title="Epoch", yaxis_title="MSE")
+        st.plotly_chart(fig_loss, width="stretch")
 
 # ── Tab 4 : Horizon ───────────────────────────────────────────────────────────
 with tab4:
@@ -312,11 +312,12 @@ with tab4:
             ))
         fig_h.update_layout(
             **_plotly_base(),
+            margin=dict(l=16, r=16, t=32, b=16),
             title="MAE par pas d'horizon",
             xaxis_title="Horizon (heures)",
             yaxis_title="MAE (kW)",
         )
-        st.plotly_chart(fig_h, use_container_width=True)
+        st.plotly_chart(fig_h, width="stretch")
 
 # ── Tab 5 : Guide ─────────────────────────────────────────────────────────────
 with tab5:
