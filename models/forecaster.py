@@ -181,11 +181,13 @@ class _LSTMNet:
 
         class Net(nn.Module):
             def __init__(self):
+                """Construit les couches LSTM et lineaire."""
                 super().__init__()
                 self.lstm = nn.LSTM(input_size, hidden, n_layers, batch_first=True)
                 self.fc = nn.Linear(hidden, 1)
 
             def forward(self, x):
+                """Passe avant : LSTM puis projection lineaire sur le dernier pas."""
                 out, _ = self.lstm(x)
                 return self.fc(out[:, -1, :])
 
