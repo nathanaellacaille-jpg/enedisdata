@@ -1,23 +1,57 @@
 import io
 import pandas as pd
+from config import MAX_METERS_UPLOAD
 
 
 _REQUIRED_TS = {"id", "horodate", "valeur"}
 _REQUIRED_LBL = {"id", "label"}
 
 
-def parse_timeseries(file) -> pd.DataFrame:
-    """Lit un CSV Enedis, retourne df [meter_id, ts, kw]."""
-    raw = file.read() if hasattr(file, "read") else open(file, "rb").read()
-    sample = raw[:4096].decode("utf-8", errors="replace")
+def parse_timeseries(file, max_meters: int = MAX_METERS_UPLOAD) -> pd.DataFrame:
+    """Lit un CSV Enedis par chunks, retourne df [meter_id, ts, kw] (max max_meters compteurs)."""
+    # Detecte le separateur sur un echantillon sans consommer le flux
+    if hasattr(file, "read"):
+        sample_bytes = file.read(4096)
+        file.seek(0)
+    else:
+        with open(file, "rb") as fh:
+            sample_bytes = fh.read(4096)
+    sample = sample_bytes.decode("utf-8", errors="replace")
     sep = _detect_sep(sample)
-    df = pd.read_csv(io.BytesIO(raw), sep=sep, encoding="utf-8", low_memory=False)
-    df.columns = [c.strip().lower() for c in df.columns]
-    missing = _REQUIRED_TS - set(df.columns)
-    if missing:
-        raise ValueError(f"Colonnes manquantes : {missing}. Colonnes trouvees : {list(df.columns)}")
-    df = df.rename(columns={"id": "meter_id", "horodate": "ts", "valeur": "kw"})
-    df["meter_id"] = df["meter_id"].astype(str)
+
+    # Lecture par chunks
+    chunks = []
+    seen_ids: set = set()
+    validated = False
+
+    reader = pd.read_csv(file, sep=sep, encoding="utf-8", low_memory=False, chunksize=50_000)
+    for chunk in reader:
+        chunk.columns = [c.strip().lower() for c in chunk.columns]
+        if not validated:
+            missing = _REQUIRED_TS - set(chunk.columns)
+            if missing:
+                raise ValueError(f"Colonnes manquantes : {missing}. Colonnes trouvees : {list(chunk.columns)}")
+            validated = True
+        chunk = chunk.rename(columns={"id": "meter_id", "horodate": "ts", "valeur": "kw"})
+        chunk["meter_id"] = chunk["meter_id"].astype(str)
+
+        # Ajoute les nouveaux ids dans la limite max_meters
+        new_ids = set(chunk["meter_id"].unique()) - seen_ids
+        remaining = max_meters - len(seen_ids)
+        if new_ids and remaining > 0:
+            seen_ids |= set(list(new_ids)[:remaining])
+
+        filtered = chunk[chunk["meter_id"].isin(seen_ids)]
+        if not filtered.empty:
+            chunks.append(filtered)
+
+        if len(seen_ids) >= max_meters:
+            break
+
+    if not chunks:
+        return pd.DataFrame(columns=["meter_id", "ts", "kw"])
+
+    df = pd.concat(chunks, ignore_index=True)
     df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
     df = df.dropna(subset=["ts"])
     df["kw"] = pd.to_numeric(df["kw"], errors="coerce").fillna(0.0).astype("float64")

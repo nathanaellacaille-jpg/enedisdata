@@ -49,6 +49,8 @@ LSTM_LR = 1e-3
 GEN_DEFAULT_N = 10
 GEN_NOISE_STD = 0.15
 
+MAX_METERS_UPLOAD = 300
+
 DAY_FR = {
     "Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi",
     "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche",

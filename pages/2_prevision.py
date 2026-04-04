@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, FCST_HORIZON_H, STEPS_PER_DAY, FCST_ARIMA_ORDER
+from config import PAL, FCST_HORIZON_H, STEPS_PER_DAY, FCST_ARIMA_ORDER, MAX_METERS_UPLOAD
 from models.forecaster import RidgeForecaster, ARIMAForecaster, LSTMForecaster
 from utils.metrics import compute_metrics
 from utils.parser import parse_timeseries
@@ -40,7 +40,7 @@ def _plotly_base() -> dict:
 def _load_ts(file_bytes: bytes, file_name: str) -> pd.DataFrame:
     """Charge et parse le CSV timeseries."""
     import io
-    return parse_timeseries(io.BytesIO(file_bytes))
+    return parse_timeseries(io.BytesIO(file_bytes), max_meters=MAX_METERS_UPLOAD)
 
 
 @st.cache_resource
@@ -91,6 +91,8 @@ with st.sidebar:
     if ts_file:
         try:
             df = _load_ts(ts_file.getvalue(), ts_file.name)
+            n_meters = df["meter_id"].nunique()
+            st.caption(f"{n_meters} compteurs charges · {len(df):,} points")
             meter_ids = sorted(df["meter_id"].unique().tolist())
             selected = st.selectbox("Compteur", meter_ids, key="fcst_meter")
         except ValueError as e:
