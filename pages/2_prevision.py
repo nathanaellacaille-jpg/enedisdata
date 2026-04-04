@@ -82,20 +82,24 @@ with st.sidebar:
     st.markdown("**Donnees**")
     ts_file = st.file_uploader("Timeseries CSV", type=["csv"], key="fcst_ts")
 
-    df = None
+    if ts_file is not None:
+        if st.session_state.get("_ts_file_name") != ts_file.name:
+            try:
+                st.session_state["_ts_df"] = _load_ts(ts_file.getvalue(), ts_file.name)
+                st.session_state["_ts_file_name"] = ts_file.name
+            except ValueError as e:
+                st.error(str(e))
+
+    df = st.session_state.get("_ts_df")
     selected = None
     use_arima = False
     use_lstm = False
 
-    if ts_file:
-        try:
-            df = _load_ts(ts_file.getvalue(), ts_file.name)
-            n_meters = df["meter_id"].nunique()
-            st.caption(f"{n_meters} compteurs charges · {len(df):,} points")
-            meter_ids = sorted(df["meter_id"].unique().tolist())
-            selected = st.selectbox("Compteur", meter_ids, key="fcst_meter")
-        except ValueError as e:
-            st.error(str(e))
+    if df is not None:
+        n_meters = df["meter_id"].nunique()
+        st.caption(f"{n_meters} compteurs charges · {len(df):,} points")
+        meter_ids = sorted(df["meter_id"].unique().tolist())
+        selected = st.selectbox("Compteur", meter_ids, key="fcst_meter")
 
     st.markdown("**Modeles**")
     use_arima = st.checkbox("Activer ARIMA", value=False, key="use_arima")

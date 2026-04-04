@@ -81,19 +81,29 @@ with st.sidebar:
     ts_file = st.file_uploader("Timeseries CSV", type=["csv"], key="clf_ts")
     lbl_file = st.file_uploader("Labels CSV (optionnel)", type=["csv"], key="clf_lbl")
 
-    if ts_file:
-        try:
-            df = _load_ts(ts_file.getvalue(), ts_file.name)
-            n_meters = df["meter_id"].nunique()
-            st.caption(f"{n_meters} compteurs charges · {len(df):,} points")
-            meter_ids = sorted(df["meter_id"].unique().tolist())
-            selected = st.selectbox("Compteur", meter_ids, key="clf_meter")
-        except ValueError as e:
-            st.error(str(e))
-            df = None
-            selected = None
+    if ts_file is not None:
+        if st.session_state.get("_ts_file_name") != ts_file.name:
+            try:
+                st.session_state["_ts_df"] = _load_ts(ts_file.getvalue(), ts_file.name)
+                st.session_state["_ts_file_name"] = ts_file.name
+            except ValueError as e:
+                st.error(str(e))
+
+    if lbl_file is not None:
+        if st.session_state.get("_labels_file_name") != lbl_file.name:
+            try:
+                st.session_state["_labels"] = _load_labels(lbl_file.getvalue(), lbl_file.name)
+                st.session_state["_labels_file_name"] = lbl_file.name
+            except ValueError as e:
+                st.error(str(e))
+
+    df = st.session_state.get("_ts_df")
+    if df is not None:
+        n_meters = df["meter_id"].nunique()
+        st.caption(f"{n_meters} compteurs charges · {len(df):,} points")
+        meter_ids = sorted(df["meter_id"].unique().tolist())
+        selected = st.selectbox("Compteur", meter_ids, key="clf_meter")
     else:
-        df = None
         selected = None
 
     st.markdown(
@@ -116,14 +126,10 @@ if df is None:
 features = _compute_features(df)
 
 # Labels + modele
-labels = None
+labels = st.session_state.get("_labels")
 clf = None
-if lbl_file:
-    try:
-        labels = _load_labels(lbl_file.getvalue(), lbl_file.name)
-        clf, X_test, y_test, y_pred = _train_model(features, labels)
-    except ValueError as e:
-        st.error(str(e))
+if labels is not None:
+    clf, X_test, y_test, y_pred = _train_model(features, labels)
 
 # Predictions sur tout le dataset
 if clf is not None:
