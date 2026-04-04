@@ -2,7 +2,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-import io
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -52,24 +51,20 @@ def _load_labels(file_bytes: bytes, file_name: str) -> dict:
     return parse_labels(io.BytesIO(file_bytes))
 
 
-@st.cache_data
-def _compute_features(df_json: str) -> pd.DataFrame:
-    """Calcule les features depuis le dataframe serialise."""
-    df = pd.read_json(io.StringIO(df_json), orient="split")
-    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json()})
+def _compute_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Calcule les features par compteur."""
     return extract_features(df)
 
 
-@st.cache_resource
-def _train_model(features_json: str, labels_json: str):
+@st.cache_resource(hash_funcs={pd.DataFrame: lambda df: df.to_json()})
+def _train_model(features: pd.DataFrame, labels: dict):
     """Entraine le classifieur et retourne (model, X_test, y_test, y_pred)."""
-    feat = pd.read_json(io.StringIO(features_json), orient="split")
-    labels_dict = pd.read_json(io.StringIO(labels_json), typ="series").to_dict()
-    common = [mid for mid in feat.index if str(mid) in labels_dict]
+    common = [mid for mid in features.index if str(mid) in labels]
     if len(common) < 4:
         return None, None, None, None
-    X = feat.loc[common]
-    y = np.array([labels_dict[str(mid)] for mid in common])
+    X = features.loc[common]
+    y = np.array([labels[str(mid)] for mid in common])
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=CLF_TEST_SIZE, random_state=42, stratify=y if len(np.unique(y)) > 1 else None
     )
@@ -118,8 +113,7 @@ if df is None:
     st.stop()
 
 # Features globales
-features_json = _compute_features(df.to_json(orient="split", date_format="iso"))
-features = pd.read_json(io.StringIO(features_json), orient="split")
+features = _compute_features(df)
 
 # Labels + modele
 labels = None
@@ -127,11 +121,7 @@ clf = None
 if lbl_file:
     try:
         labels = _load_labels(lbl_file.getvalue(), lbl_file.name)
-        labels_series = pd.Series(labels)
-        clf, X_test, y_test, y_pred = _train_model(
-            features_json,
-            labels_series.to_json(),
-        )
+        clf, X_test, y_test, y_pred = _train_model(features, labels)
     except ValueError as e:
         st.error(str(e))
 
