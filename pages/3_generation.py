@@ -144,12 +144,12 @@ with tab1:
                     mode="lines",
                     line=dict(color=PAL.REAL, width=1.5),
                 ))
-                fig_g.update_layout(
+                fig_g.update_layout(**{
                     **_plotly_base(),
-                    title=f"{ct}-{cid}",
-                    height=200,
-                    margin=dict(l=8, r=8, t=28, b=8),
-                )
+                    "title": f"{ct}-{cid}",
+                    "height": 200,
+                    "margin": dict(l=8, r=8, t=28, b=8),
+                })
                 row_cols[col_idx].plotly_chart(fig_g, use_container_width=True)
 
 # ── Tab 2 : Profils ──────────────────────────────────────────────────────────
