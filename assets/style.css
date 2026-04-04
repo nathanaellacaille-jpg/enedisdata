@@ -1,0 +1,139 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    font-weight: 400;
+}
+
+/* Hide Streamlit chrome */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+[data-testid="stDecoration"] { display: none; }
+[data-testid="stToolbar"] { display: none; }
+
+/* App header */
+.app-header {
+    padding: 20px 0 16px 0;
+    border-bottom: 0.5px solid #E2E8F0;
+    margin-bottom: 24px;
+}
+.app-title {
+    font-size: 18px;
+    font-weight: 500;
+    color: #0F172A;
+    letter-spacing: -0.3px;
+}
+.app-subtitle {
+    font-size: 12px;
+    color: #64748B;
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background: #FAFAFA;
+    border-right: 0.5px solid #E2E8F0;
+}
+
+/* Sidebar footer badge */
+.sidebar-footer {
+    font-size: 11px;
+    color: #64748B;
+    padding: 12px 0 4px 0;
+    border-top: 0.5px solid #E2E8F0;
+    margin-top: 24px;
+}
+.sidebar-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 500;
+    color: #475569;
+    border: 0.5px solid #CBD5E1;
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin-bottom: 6px;
+}
+
+/* Metrics */
+[data-testid="stMetric"] {
+    background: #F8FAFC;
+    border: 0.5px solid #E2E8F0;
+    border-radius: 6px;
+    padding: 12px 14px;
+}
+[data-testid="stMetricLabel"] {
+    font-size: 11px !important;
+    color: #64748B !important;
+    font-weight: 400 !important;
+}
+[data-testid="stMetricValue"] {
+    font-size: 22px !important;
+    color: #0F172A !important;
+    font-weight: 500 !important;
+}
+[data-testid="stMetricDelta"] {
+    font-size: 11px !important;
+    color: #64748B !important;
+}
+
+/* Buttons */
+.stButton > button {
+    background: transparent;
+    border: 0.5px solid #CBD5E1;
+    border-radius: 6px;
+    color: #0F172A;
+    font-size: 13px;
+    font-weight: 400;
+}
+.stButton > button:hover {
+    background: #F1F5F9;
+    border-color: #94A3B8;
+}
+
+/* Tabs */
+[data-testid="stTabs"] [role="tab"] {
+    font-size: 13px;
+    font-weight: 400;
+    color: #64748B;
+    border-bottom: 1.5px solid transparent;
+    padding-bottom: 8px;
+}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    color: #0F172A;
+    font-weight: 500;
+    border-bottom: 1.5px solid #0F172A;
+}
+
+/* Cards / containers */
+.stContainer {
+    border: 0.5px solid #E2E8F0;
+    border-radius: 8px;
+}
+
+/* Inputs */
+[data-testid="stSelectbox"] label,
+[data-testid="stSlider"] label,
+[data-testid="stCheckbox"] label,
+[data-testid="stRadio"] label {
+    font-size: 13px;
+    color: #0F172A;
+    font-weight: 400;
+}
+
+/* Captions */
+.stCaption {
+    font-size: 11px;
+    color: #64748B;
+}
+
+/* No strong/bold rendering above weight 500 */
+strong, b {
+    font-weight: 500;
+}
+
+/* DataFrame */
+[data-testid="stDataFrame"] {
+    border: 0.5px solid #E2E8F0;
+    border-radius: 6px;
+}
