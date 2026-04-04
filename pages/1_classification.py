@@ -2,6 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import io
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -54,7 +55,7 @@ def _load_labels(file_bytes: bytes, file_name: str) -> dict:
 @st.cache_data
 def _compute_features(df_json: str) -> pd.DataFrame:
     """Calcule les features depuis le dataframe serialise."""
-    df = pd.read_json(df_json, orient="split")
+    df = pd.read_json(io.StringIO(df_json), orient="split")
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     return extract_features(df)
 
@@ -62,8 +63,8 @@ def _compute_features(df_json: str) -> pd.DataFrame:
 @st.cache_resource
 def _train_model(features_json: str, labels_json: str):
     """Entraine le classifieur et retourne (model, X_test, y_test, y_pred)."""
-    feat = pd.read_json(features_json, orient="split")
-    labels_dict = pd.read_json(labels_json, typ="series").to_dict()
+    feat = pd.read_json(io.StringIO(features_json), orient="split")
+    labels_dict = pd.read_json(io.StringIO(labels_json), typ="series").to_dict()
     common = [mid for mid in feat.index if str(mid) in labels_dict]
     if len(common) < 4:
         return None, None, None, None
@@ -118,7 +119,7 @@ if df is None:
 
 # Features globales
 features_json = _compute_features(df.to_json(orient="split", date_format="iso"))
-features = pd.read_json(features_json, orient="split")
+features = pd.read_json(io.StringIO(features_json), orient="split")
 
 # Labels + modele
 labels = None
