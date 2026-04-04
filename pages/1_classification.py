@@ -271,7 +271,19 @@ with tab3:
     if clf is None or meter_feat.empty:
         st.caption("Modele non disponible. Chargez des labels.")
     else:
-        importances = clf.feature_importances(features)
+        # Labels reels si disponibles, sinon labels predits
+        if labels is not None:
+            common_idx = [mid for mid in features.index if str(mid) in labels]
+            if len(common_idx) >= 2:
+                X_imp = features.loc[common_idx]
+                y_imp = np.array([labels[str(mid)] for mid in common_idx])
+            else:
+                X_imp = features
+                y_imp = pred_series.reindex(features.index).fillna(0).values.astype(int)
+        else:
+            X_imp = features
+            y_imp = pred_series.reindex(features.index).fillna(0).values.astype(int)
+        importances = clf.feature_importances(X_imp, y_imp)
         top5 = importances.head(5)
 
         fig_imp = go.Figure(go.Bar(
