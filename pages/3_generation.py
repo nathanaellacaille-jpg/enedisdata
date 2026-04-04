@@ -75,6 +75,26 @@ with st.sidebar:
     ts_file = st.file_uploader("Timeseries CSV", type=["csv"], key="gen_ts")
     lbl_file = st.file_uploader("Labels CSV", type=["csv"], key="gen_lbl")
 
+    if ts_file is not None:
+        if st.session_state.get("_ts_file_name") != ts_file.name:
+            try:
+                ts_bytes_new = ts_file.getvalue()
+                st.session_state["_ts_df"] = _load_ts(ts_bytes_new, ts_file.name)
+                st.session_state["_ts_bytes"] = ts_bytes_new
+                st.session_state["_ts_file_name"] = ts_file.name
+            except ValueError as e:
+                st.error(str(e))
+
+    if lbl_file is not None:
+        if st.session_state.get("_labels_file_name") != lbl_file.name:
+            try:
+                lbl_bytes_new = lbl_file.getvalue()
+                st.session_state["_labels"] = _load_labels(lbl_bytes_new, lbl_file.name)
+                st.session_state["_lbl_bytes"] = lbl_bytes_new
+                st.session_state["_labels_file_name"] = lbl_file.name
+            except ValueError as e:
+                st.error(str(e))
+
     st.markdown("**Parametres**")
     curve_type_label = st.radio("Type", ["RS", "RP", "Mixte"], key="gen_type")
     curve_type = {"RS": "RS", "RP": "RP", "Mixte": "mixed"}[curve_type_label]
@@ -94,17 +114,18 @@ with st.sidebar:
 
 st.markdown("## Generation")
 
-ts_bytes = ts_file.getvalue() if ts_file else None
-lbl_bytes = lbl_file.getvalue() if lbl_file else None
-ts_key = ts_file.name if ts_file else "none"
-lbl_key = lbl_file.name if lbl_file else "none"
+ts_bytes = st.session_state.get("_ts_bytes")
+lbl_bytes = st.session_state.get("_lbl_bytes")
+ts_key = st.session_state.get("_ts_file_name", "none")
+lbl_key = st.session_state.get("_labels_file_name", "none")
 
 gen_df = _generate(ts_key, lbl_key, n_curves, curve_type, n_days, GEN_NOISE_STD, ts_bytes, lbl_bytes)
 
 if ts_bytes:
-    _ts_info = _load_ts(ts_bytes, ts_key)
-    n_meters = _ts_info["meter_id"].nunique()
-    st.caption(f"{n_meters} compteurs charges · {len(_ts_info):,} points")
+    _ts_info = st.session_state.get("_ts_df")
+    if _ts_info is not None:
+        n_meters = _ts_info["meter_id"].nunique()
+        st.caption(f"{n_meters} compteurs charges · {len(_ts_info):,} points")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Courbes", "Profils", "Comparaison", "Statistiques", "Export"])
 
