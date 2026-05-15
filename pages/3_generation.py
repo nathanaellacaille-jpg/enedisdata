@@ -247,6 +247,13 @@ with tab3:
 
 # ── Tab 4 : Statistiques ──────────────────────────────────────────────────────
 with tab4:
+    gen_inst = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
+    dtw_scores = gen_inst.quality_scores(gen_df)
+    if dtw_scores:
+        st.markdown("**Ecart moyen vs profil reel**")
+        cols_dtw = st.columns(len(dtw_scores))
+        for col, (ct, score) in zip(cols_dtw, dtw_scores.items()):
+            col.metric(f"DTW {ct}", f"{score:.2f} kW", delta_color="off")
     # Distribution energie journaliere
     daily_energy = gen_df.groupby(["curve_id", "day"])["kw"].sum() * 0.5
     fig_dist = go.Figure(go.Histogram(
@@ -286,12 +293,8 @@ with tab5:
     st.download_button("Telecharger CSV", csv_bytes, file_name="courbes_synthetiques.csv", mime="text/csv")
 
     # JSON resume stats
-    gen_inst = CurveGenerator()
-    gen_inst.fit(
-        parse_timeseries(__import__("io").BytesIO(ts_bytes)) if ts_bytes else None,
-        parse_labels(__import__("io").BytesIO(lbl_bytes)) if lbl_bytes else None,
-    )
-    stats_dict = gen_inst.profile_stats()
+    gen_inst_export = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
+    stats_dict = gen_inst_export.profile_stats()
     stats_dict["n_curves"] = int(n_curves)
     stats_dict["n_days"] = int(n_days)
     stats_dict["curve_type"] = curve_type
