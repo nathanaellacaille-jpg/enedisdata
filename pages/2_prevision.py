@@ -36,11 +36,11 @@ def _load_ts(file_bytes: bytes, file_name: str) -> pd.DataFrame:
 
 
 @st.cache_resource
-def _train_ridge(series_key: str, series: list, start_ts: pd.Timestamp | None = None) -> RidgeForecaster:
+def _train_ridge(series_key: str, series: list) -> RidgeForecaster:
     """Entraine le forecaster Ridge."""
     arr = np.array(series, dtype=float)
     mdl = RidgeForecaster()
-    mdl.fit(arr, start_ts=start_ts)
+    mdl.fit(arr)
     return mdl
 
 
@@ -134,8 +134,7 @@ train_ts = ts_index[:-horizon]
 test_ts = ts_index[-horizon:]
 
 # Entrainement sur train_series uniquement
-start_ts = pd.Timestamp(train_ts[0]) if len(train_ts) > 0 else None
-ridge = _train_ridge(series_key, train_series.tolist(), start_ts=start_ts)
+ridge = _train_ridge(series_key, train_series.tolist())
 ridge_pred = ridge.predict(horizon)
 
 naive_pred = _naive_forecast(train_series, horizon)
