@@ -1,16 +1,34 @@
 import sys
-import types
-import importlib
+import importlib.util
 import streamlit as st
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+_root = Path(__file__).resolve().parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
-# Fix Python 3.14 + Streamlit : sys.modules ne pre-enregistre pas les packages
-# locaux dans le contexte exec() de Streamlit, ce qui provoque KeyError: 'utils'
-for _pkg in ("utils", "models"):
-    if _pkg not in sys.modules:
-        sys.modules[_pkg] = types.ModuleType(_pkg)
+
+def _ensure_package(name: str) -> None:
+    """Enregistre un package local dans sys.modules avec __path__ correct.
+
+    Contourne KeyError: 'utils' sur Python 3.14 + Streamlit 1.57 où le runner
+    interne (_mpa_v1) execute app.py sans que les packages locaux soient dans
+    sys.modules, ce qui fait echouer l'import de sous-modules (utils.parser…).
+    """
+    if name in sys.modules:
+        return
+    spec = importlib.util.spec_from_file_location(
+        name,
+        _root / name / "__init__.py",
+        submodule_search_locations=[str(_root / name)],
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+
+
+_ensure_package("utils")
+_ensure_package("models")
 
 import utils.parser, utils.features, utils.metrics  # noqa: E401, F401
 import models.classifier, models.forecaster, models.generator  # noqa: E401, F401
