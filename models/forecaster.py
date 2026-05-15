@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.linear_model import Ridge
 from config import (
     FCST_N_LAGS, FCST_N_FOURIER, FCST_ARIMA_ORDER,
-    LSTM_SEQ_LEN, LSTM_HIDDEN, LSTM_LAYERS, LSTM_EPOCHS, LSTM_LR,
+    LSTM_SEQ_LEN, LSTM_HIDDEN, LSTM_LAYERS, LSTM_EPOCHS, LSTM_LR, LSTM_BATCH_SIZE,
 )
 
 
@@ -146,17 +146,26 @@ class LSTMForecaster:
         opt = torch.optim.Adam(self._model.parameters(), lr=LSTM_LR)
         criterion = nn.MSELoss()
         self.losses = []
+        n_samples = X.shape[0]
 
         for epoch in range(LSTM_EPOCHS):
             self._model.train()
-            opt.zero_grad()
-            out = self._model(X).squeeze(-1)
-            loss = criterion(out, y)
-            loss.backward()
-            opt.step()
-            self.losses.append(float(loss.item()))
+            indices = torch.randperm(n_samples)
+            epoch_loss = 0.0
+            for start in range(0, n_samples, LSTM_BATCH_SIZE):
+                batch_idx = indices[start:start + LSTM_BATCH_SIZE]
+                X_batch = X[batch_idx]
+                y_batch = y[batch_idx]
+                opt.zero_grad()
+                out = self._model(X_batch).squeeze(-1)
+                loss = criterion(out, y_batch)
+                loss.backward()
+                opt.step()
+                epoch_loss += loss.item() * len(batch_idx)
+            avg_loss = epoch_loss / n_samples
+            self.losses.append(avg_loss)
             if callback:
-                callback(epoch, float(loss.item()))
+                callback(epoch, avg_loss)
 
         self._last_seq = torch.tensor(s[-seq_len:], dtype=torch.float32)
         return self
