@@ -34,7 +34,7 @@ STEPS_PER_HOUR = 2
 CLF_TEST_SIZE = 0.30
 CLF_N_TREES = 300
 
-FCST_N_LAGS = 48
+FCST_N_LAGS = 384  # 8 jours de lags : Ridge sélectionne j-1..j-8 via régularisation L2
 FCST_N_FOURIER = 3
 FCST_HORIZON_H = 24
 FCST_ARIMA_ORDER = (2, 1, 2)

@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, recall_score, make_scorer
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_validate
 
-from config import PAL, CLF_TEST_SIZE, MAX_METERS_UPLOAD, _make_rp_profile, _make_rs_profile
+from config import PAL, CLF_TEST_SIZE, CLF_N_TREES, MAX_METERS_UPLOAD, _make_rp_profile, _make_rs_profile
 from models.classifier import EnergyClassifier
 from utils.features import extract_features
 from utils.parser import parse_timeseries, parse_labels
@@ -52,10 +52,14 @@ def _compute_features(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_resource(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
 def _train_model(features: pd.DataFrame, labels: dict):
-    """Entraine le classifieur et retourne (model, X_test, y_test, y_pred)."""
+    """Entraine le classifieur et retourne (model, X_test, y_test, y_proba_test, cv_scores)."""
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.ensemble import RandomForestClassifier
+
     common = [mid for mid in features.index if str(mid) in labels]
     if len(common) < 4:
-        return None, None, None, None
+        return None, None, None, None, None
     X = features.loc[common]
     y = np.array([labels[str(mid)] for mid in common])
     X_train, X_test, y_train, y_test = train_test_split(
@@ -63,8 +67,29 @@ def _train_model(features: pd.DataFrame, labels: dict):
     )
     clf = EnergyClassifier()
     clf.fit(X_train, y_train)
-    y_pred = clf.predict(X_test)
-    return clf, X_test, y_test, y_pred
+    y_proba_test = clf.predict_proba(X_test)
+
+    # Validation croisée stratifiée 5 folds sur la totalité des données labellisées
+    cv_pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1)),
+    ])
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    scoring = {
+        "accuracy": "accuracy",
+        "f1": "f1_weighted",
+        "recall_rs": make_scorer(recall_score, pos_label=1, zero_division=0),
+    }
+    cv_res = cross_validate(cv_pipe, X, y, cv=cv, scoring=scoring)
+    cv_scores = {
+        "accuracy": float(cv_res["test_accuracy"].mean()),
+        "f1": float(cv_res["test_f1"].mean()),
+        "recall_rs": float(cv_res["test_recall_rs"].mean()),
+        "accuracy_std": float(cv_res["test_accuracy"].std()),
+        "f1_std": float(cv_res["test_f1"].std()),
+        "recall_rs_std": float(cv_res["test_recall_rs"].std()),
+    }
+    return clf, X_test, y_test, y_proba_test, cv_scores
 
 
 # ── sidebar ───────────────────────────────────────────────────────────────────
@@ -121,8 +146,11 @@ features = _compute_features(df)
 # Labels + modele
 labels = st.session_state.get("_labels")
 clf = None
+y_proba_test = None
+cv_scores = None
 if labels is not None:
-    clf, X_test, y_test, y_pred = _train_model(features, labels)
+    clf, X_test, y_test, y_proba_test, cv_scores = _train_model(features, labels)
+y_pred = (y_proba_test >= 0.5).astype(int) if y_proba_test is not None else None
 
 # Predictions sur tout le dataset
 if clf is not None:
@@ -323,18 +351,53 @@ with tab3:
 
 # ── Tab 4 : Performance ───────────────────────────────────────────────────────
 with tab4:
-    if clf is None or y_test is None:
+    if clf is None or y_test is None or y_proba_test is None:
         st.caption("Chargez des labels pour evaluer les performances.")
     else:
-        acc = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
-        cm = confusion_matrix(y_test, y_pred)
+        # Métriques cross-validation 5 folds (estimation stable)
+        if cv_scores is not None:
+            st.markdown("**Validation croisee — StratifiedKFold(5)**")
+            st.caption("Estimation sur la totalite des donnees labelisees (plus stable qu'un seul split).")
+            c1, c2, c3 = st.columns(3)
+            c1.metric(
+                "Accuracy CV",
+                f"{cv_scores['accuracy']:.2%}",
+                f"± {cv_scores['accuracy_std']:.2%}",
+                delta_color="off",
+            )
+            c2.metric(
+                "F1 CV (pondere)",
+                f"{cv_scores['f1']:.3f}",
+                f"± {cv_scores['f1_std']:.3f}",
+                delta_color="off",
+            )
+            c3.metric(
+                "Recall RS CV",
+                f"{cv_scores['recall_rs']:.2%}",
+                f"± {cv_scores['recall_rs_std']:.2%}",
+                delta_color="off",
+            )
 
-        m1, m2 = st.columns(2)
-        m1.metric("Accuracy", f"{acc:.2%}", delta_color="off")
+        st.markdown("---")
+
+        # Seuil de classification ajustable
+        st.markdown("**Matrice de confusion — seuil ajustable**")
+        threshold = st.slider(
+            "Seuil RS (proba >= seuil → classe RS)",
+            min_value=0.30, max_value=0.70, value=0.50, step=0.01,
+            key="clf_threshold",
+        )
+        y_pred_thresh = (y_proba_test >= threshold).astype(int)
+        acc = accuracy_score(y_test, y_pred_thresh)
+        f1 = f1_score(y_test, y_pred_thresh, average="weighted", zero_division=0)
+        rec_rs = recall_score(y_test, y_pred_thresh, pos_label=1, zero_division=0)
+        cm = confusion_matrix(y_test, y_pred_thresh)
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Accuracy (test)", f"{acc:.2%}", delta_color="off")
         m2.metric("F1 (pondere)", f"{f1:.3f}", delta_color="off")
+        m3.metric("Recall RS (test)", f"{rec_rs:.2%}", delta_color="off")
 
-        # Matrice de confusion
         labels_names = ["RP", "RS"]
         fig_cm = go.Figure(go.Heatmap(
             z=cm,

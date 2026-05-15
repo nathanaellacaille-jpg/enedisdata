@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, FCST_HORIZON_H, STEPS_PER_DAY, FCST_ARIMA_ORDER, MAX_METERS_UPLOAD
+from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, FCST_ARIMA_ORDER, MAX_METERS_UPLOAD
 from models.forecaster import RidgeForecaster, ARIMAForecaster, LSTMForecaster
 from utils.metrics import compute_metrics
 from utils.parser import parse_timeseries
@@ -36,11 +36,11 @@ def _load_ts(file_bytes: bytes, file_name: str) -> pd.DataFrame:
 
 
 @st.cache_resource
-def _train_ridge(series_key: str, series: list) -> RidgeForecaster:
+def _train_ridge(series_key: str, series: list, start_ts: pd.Timestamp | None = None) -> RidgeForecaster:
     """Entraine le forecaster Ridge."""
     arr = np.array(series, dtype=float)
     mdl = RidgeForecaster()
-    mdl.fit(arr)
+    mdl.fit(arr, start_ts=start_ts)
     return mdl
 
 
@@ -118,8 +118,9 @@ meter_df = df[df["meter_id"] == selected].sort_values("ts").reset_index(drop=Tru
 series = meter_df["kw"].values.astype(float)
 ts_index = meter_df["ts"].values
 
-if len(series) < STEPS_PER_DAY * 3:
-    st.warning("Serie trop courte pour la prevision (minimum 3 jours).")
+if len(series) < FCST_N_LAGS + FCST_HORIZON_H * 2 + STEPS_PER_DAY:
+    min_days = (FCST_N_LAGS + FCST_HORIZON_H * 2 + STEPS_PER_DAY) // STEPS_PER_DAY
+    st.warning(f"Serie trop courte pour la prevision (minimum {min_days} jours).")
     st.stop()
 
 # Horizon en pas (24h = 48 pas)
@@ -133,7 +134,8 @@ train_ts = ts_index[:-horizon]
 test_ts = ts_index[-horizon:]
 
 # Entrainement sur train_series uniquement
-ridge = _train_ridge(series_key, train_series.tolist())
+start_ts = pd.Timestamp(train_ts[0]) if len(train_ts) > 0 else None
+ridge = _train_ridge(series_key, train_series.tolist(), start_ts=start_ts)
 ridge_pred = ridge.predict(horizon)
 
 naive_pred = _naive_forecast(train_series, horizon)
@@ -254,7 +256,7 @@ with tab2:
 with tab3:
     st.markdown("**Coefficients Ridge**")
     coef = ridge.coef_series()
-    top_coef = coef.head(20)
+    top_coef = coef.reindex(coef.abs().nlargest(20).index)
     fig_coef = go.Figure(go.Bar(
         x=top_coef.values[::-1],
         y=top_coef.index[::-1],
