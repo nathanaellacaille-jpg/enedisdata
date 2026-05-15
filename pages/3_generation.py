@@ -13,7 +13,7 @@ from models.generator import CurveGenerator
 from utils.parser import parse_timeseries, parse_labels
 
 
-st.set_page_config(page_title="Generation", layout="wide")
+st.set_page_config(page_title="Generation", layout="wide", initial_sidebar_state="expanded")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
