@@ -1,7 +1,3 @@
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
