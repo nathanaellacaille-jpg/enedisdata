@@ -18,6 +18,7 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
     grp = grp.sort_values("ts").copy()
     grp["date"] = grp["ts"].dt.date
     grp["hour"] = grp["ts"].dt.hour
+    grp["month"] = grp["ts"].dt.month
     grp["dayofweek"] = grp["ts"].dt.dayofweek  # 0=Mon, 6=Sun
 
     daily = grp.groupby("date")["kw"].sum() * 0.5  # kWh par jour
@@ -35,8 +36,18 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
     total = grp["kw"].sum()
     peak_mask = (grp["hour"] >= 18) & (grp["hour"] < 22)
     night_mask = grp["hour"] < 6
+    morning_mask = (grp["hour"] >= 6) & (grp["hour"] < 9)
     peak_hour_ratio = grp.loc[peak_mask, "kw"].sum() / total if total > 0 else 0.0
     night_ratio = grp.loc[night_mask, "kw"].sum() / total if total > 0 else 0.0
+    morning_ratio = grp.loc[morning_mask, "kw"].sum() / total if total > 0 else 0.0
+
+    summer_kw = grp.loc[grp["month"].isin([6, 7, 8]), "kw"].sum()
+    winter_kw = grp.loc[grp["month"].isin([12, 1, 2]), "kw"].sum()
+    seasonal_ratio = (summer_kw / winter_kw) if winter_kw > 0 else 1.0
+
+    grp["week"] = grp["ts"].dt.to_period("W")
+    weekly_energy = grp.groupby("week")["kw"].sum() * 0.5
+    cv_weekly = (weekly_energy.std() / weekly_energy.mean()) if weekly_energy.mean() > 0 else 0.0
 
     # Profil moyen sur 48 slots
     grp["slot"] = (grp["ts"].dt.hour * 2 + grp["ts"].dt.minute // 30)
@@ -49,6 +60,9 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
         "cv_daily_energy": cv_daily_energy,
         "peak_hour_ratio": peak_hour_ratio,
         "night_ratio": night_ratio,
+        "morning_ratio": morning_ratio,
+        "seasonal_ratio": seasonal_ratio,
+        "cv_weekly": cv_weekly,
         "fourier_amp_1": f1,
         "fourier_amp_2": f2,
         "fourier_amp_3": f3,
