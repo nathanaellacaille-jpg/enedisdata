@@ -16,9 +16,9 @@ def make_lag_features(series: np.ndarray, n_lags: int) -> np.ndarray:
     return X
 
 
-def make_fourier_features(n: int, n_harmonics: int = 3, period: int = 48) -> np.ndarray:
-    """Features sin/cos a periode fixe (defaut 48 = journalier)."""
-    t = np.arange(n)
+def make_fourier_features(n: int, n_harmonics: int = 3, period: int = 48, offset: int = 0) -> np.ndarray:
+    """Features sin/cos a periode fixe (defaut 48 = journalier). offset = indice absolu du premier point."""
+    t = np.arange(offset, offset + n)
     cols = []
     for k in range(1, n_harmonics + 1):
         cols.append(np.sin(2 * np.pi * k * t / period))
@@ -26,27 +26,50 @@ def make_fourier_features(n: int, n_harmonics: int = 3, period: int = 48) -> np.
     return np.column_stack(cols)
 
 
+def make_calendar_features(
+    n: int, offset: int = 0, start_ts: "pd.Timestamp | None" = None
+) -> np.ndarray:
+    """Features calendaires : is_weekend, sin/cos jour de semaine (encodage cyclique).
+
+    offset = indice absolu du premier point dans la série.
+    start_ts = timestamp du slot 0 de la série (ancrage jour de la semaine).
+    """
+    slots = np.arange(offset, offset + n)
+    if start_ts is not None:
+        anchor_dow = pd.Timestamp(start_ts).dayofweek  # 0=Lundi, 6=Dimanche
+        dow = (anchor_dow + slots // 48) % 7
+    else:
+        dow = (slots // 48) % 7  # relatif : suppose que la série commence un lundi
+    is_weekend = (dow >= 5).astype(float)
+    dow_sin = np.sin(2 * np.pi * dow / 7)
+    dow_cos = np.cos(2 * np.pi * dow / 7)
+    return np.column_stack([is_weekend, dow_sin, dow_cos])
+
+
 class RidgeForecaster:
     """Modele de prevision Ridge avec lags + features de Fourier."""
 
     def __init__(self, n_lags: int = FCST_N_LAGS, n_fourier: int = FCST_N_FOURIER):
         """Initialise le forecaster Ridge."""
-        self._model = Ridge(alpha=1.0)
+        self._model = Ridge(alpha=0.1)
         self.n_lags = n_lags
         self.n_fourier = n_fourier
         self._last_window: np.ndarray | None = None
+        self._start_ts: "pd.Timestamp | None" = None
 
     def _build_X(self, series: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Construit X et y depuis la serie."""
         lag_X = make_lag_features(series, self.n_lags)
         n = lag_X.shape[0]
-        fourier_X = make_fourier_features(n, self.n_fourier)
-        X = np.hstack([lag_X, fourier_X])
+        fourier_X = make_fourier_features(n, self.n_fourier, offset=self.n_lags)
+        cal_X = make_calendar_features(n, offset=self.n_lags, start_ts=self._start_ts)
+        X = np.hstack([lag_X, fourier_X, cal_X])
         y = series[self.n_lags:]
         return X, y
 
-    def fit(self, series: np.ndarray, y=None):
-        """Entraine Ridge sur la serie."""
+    def fit(self, series: np.ndarray, y=None, start_ts: "pd.Timestamp | None" = None):
+        """Entraine Ridge sur la serie. start_ts = timestamp du slot 0 pour features calendaires."""
+        self._start_ts = pd.Timestamp(start_ts) if start_ts is not None else None
         X, y_train = self._build_X(series)
         self._model.fit(X, y_train)
         self._last_window = series[-self.n_lags:].copy()
@@ -59,9 +82,9 @@ class RidgeForecaster:
         preds = []
         n_start = self._series_len
         for step in range(h):
-            fourier = make_fourier_features(n_start + step + 1, self.n_fourier)
-            f_row = fourier[-1]
-            x = np.hstack([window[::-1], f_row]).reshape(1, -1)
+            f_row = make_fourier_features(1, self.n_fourier, offset=n_start + step)[0]
+            cal_row = make_calendar_features(1, offset=n_start + step, start_ts=self._start_ts)[0]
+            x = np.hstack([window[::-1], f_row, cal_row]).reshape(1, -1)
             y_hat = self._model.predict(x)[0]
             preds.append(y_hat)
             window = np.roll(window, -1)
@@ -70,13 +93,12 @@ class RidgeForecaster:
 
     def coef_series(self) -> pd.Series:
         """Coefficients du modele Ridge."""
-        n_lag_feats = self.n_lags
-        n_fourier_feats = self.n_fourier * 2
-        lag_names = [f"lag_{i+1}" for i in range(n_lag_feats)]
+        lag_names = [f"lag_{i+1}" for i in range(self.n_lags)]
         fourier_names = []
         for k in range(1, self.n_fourier + 1):
             fourier_names += [f"sin_{k}", f"cos_{k}"]
-        names = lag_names + fourier_names
+        cal_names = ["is_weekend", "dow_sin", "dow_cos"]
+        names = lag_names + fourier_names + cal_names
         return pd.Series(self._model.coef_, index=names)
 
 
