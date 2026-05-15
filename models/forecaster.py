@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import RidgeCV
 from config import (
     FCST_N_LAGS, FCST_N_FOURIER, FCST_ARIMA_ORDER,
     LSTM_SEQ_LEN, LSTM_HIDDEN, LSTM_LAYERS, LSTM_EPOCHS, LSTM_LR, LSTM_BATCH_SIZE,
@@ -32,7 +32,7 @@ class RidgeForecaster:
 
     def __init__(self, n_lags: int = FCST_N_LAGS, n_fourier: int = FCST_N_FOURIER):
         """Initialise le forecaster Ridge."""
-        self._model = Ridge(alpha=0.1)
+        self._model = RidgeCV(alphas=[0.001, 0.01, 0.1, 1.0, 10.0, 100.0])
         self.n_lags = n_lags
         self.n_fourier = n_fourier
         self._last_window: np.ndarray | None = None
