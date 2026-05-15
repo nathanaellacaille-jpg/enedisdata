@@ -63,8 +63,8 @@ def _train_lstm(series_key: str, series: list) -> LSTMForecaster:
 
 
 def _naive_forecast(series: np.ndarray, h: int) -> np.ndarray:
-    """Prevision naive : repete l'avant-dernier jour (j-2 par rapport a l'eval)."""
-    day = series[-2 * STEPS_PER_DAY:-STEPS_PER_DAY]
+    """Prevision naive : repete le dernier jour connu de la serie d'entrainement."""
+    day = series[-STEPS_PER_DAY:]
     reps = (h // STEPS_PER_DAY) + 1
     return np.tile(day, reps)[:h]
 
@@ -126,18 +126,24 @@ if len(series) < STEPS_PER_DAY * 3:
 horizon = FCST_HORIZON_H * 2
 series_key = f"{selected}_{len(series)}"
 
-# Entrainement
-ridge = _train_ridge(series_key, series.tolist())
+# Split train/test : dernier horizon = test set, jamais vu a l'entrainement
+train_series = series[:-horizon]
+test_series = series[-horizon:]
+train_ts = ts_index[:-horizon]
+test_ts = ts_index[-horizon:]
+
+# Entrainement sur train_series uniquement
+ridge = _train_ridge(series_key, train_series.tolist())
 ridge_pred = ridge.predict(horizon)
 
-naive_pred = _naive_forecast(series, horizon)
+naive_pred = _naive_forecast(train_series, horizon)
 
 arima = None
 arima_pred = None
 if use_arima:
     with st.spinner("Ajustement ARIMA..."):
         try:
-            arima = _train_arima(series_key, series.tolist())
+            arima = _train_arima(series_key, train_series.tolist())
             arima_pred = arima.predict(horizon)
         except Exception as e:
             st.warning(f"ARIMA : {e}")
@@ -147,21 +153,18 @@ lstm_pred = None
 if use_lstm:
     with st.spinner("Entrainement LSTM..."):
         try:
-            lstm_model = _train_lstm(series_key, series.tolist())
+            lstm_model = _train_lstm(series_key, train_series.tolist())
             lstm_pred = lstm_model.predict(horizon)
         except Exception as e:
             st.warning(f"LSTM : {e}")
 
-# Timestamps futurs
-last_ts = pd.Timestamp(ts_index[-1])
-future_ts = pd.date_range(last_ts + pd.Timedelta(minutes=30), periods=horizon, freq="30min")
+# Les predictions s'alignent sur la periode de test (timestamps reels)
+last_train_ts = pd.Timestamp(train_ts[-1])
+future_ts = test_ts
 
-# Split pour evaluation (dernier horizon = test)
-if len(series) > horizon:
-    y_eval = series[-horizon:]
-    eval_ts = ts_index[-horizon:]
-else:
-    y_eval = None
+# Evaluation honnete : test_series n'a pas ete vu a l'entrainement
+y_eval = test_series
+eval_ts = test_ts
 
 # Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["Graphique", "Analyse", "Technique", "Horizon", "Guide"])
@@ -201,8 +204,8 @@ with tab1:
             line=dict(color=PAL.LSTM, width=1.5),
         ))
 
-    # Ligne de debut de prevision
-    fig.add_vline(x=str(last_ts), line_width=1, line_dash="solid", line_color=PAL.BORDER)
+    # Ligne de separation train / test
+    fig.add_vline(x=str(last_train_ts), line_width=1, line_dash="solid", line_color=PAL.BORDER)
 
     # Annotation pic d'erreur Ridge
     if y_eval is not None:

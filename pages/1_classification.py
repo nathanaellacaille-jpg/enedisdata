@@ -362,8 +362,13 @@ with tab5:
         export_df = pd.DataFrame({
             "meter_id": pred_series.index,
             "classe_predite": pred_series.values,
-            "label": ["RS" if v == 1 else "RP" for v in pred_series.values],
+            "label_predit": ["RS" if v == 1 else "RP" for v in pred_series.values],
         })
+        if labels is not None:
+            export_df["vrai_label"] = [
+                "RS" if labels.get(str(mid)) == 1 else ("RP" if labels.get(str(mid)) == 0 else "?")
+                for mid in pred_series.index
+            ]
         if not proba_series.empty:
             export_df["proba_rs"] = proba_series.reindex(pred_series.index).values
 
