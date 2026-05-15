@@ -63,8 +63,8 @@ def _train_lstm(series_key: str, series: list) -> LSTMForecaster:
 
 
 def _naive_forecast(series: np.ndarray, h: int) -> np.ndarray:
-    """Prevision naive : repete le dernier jour connu."""
-    day = series[-STEPS_PER_DAY:]
+    """Prevision naive : repete l'avant-dernier jour (j-2 par rapport a l'eval)."""
+    day = series[-2 * STEPS_PER_DAY:-STEPS_PER_DAY]
     reps = (h // STEPS_PER_DAY) + 1
     return np.tile(day, reps)[:h]
 
