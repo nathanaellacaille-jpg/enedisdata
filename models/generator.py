@@ -103,6 +103,6 @@ class CurveGenerator:
         stats = {}
         for name, profile in self._profiles.items():
             scale = self._scales[name]
-            daily_energy = profile.sum() * scale * 0.5  # kWh/jour
+            daily_energy = float(profile.sum()) * scale * 0.5  # kWh/jour
             stats[name] = {"mean_kwh_day": round(daily_energy, 2), "std": 0.0}
         return stats
