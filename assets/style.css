@@ -10,6 +10,7 @@ html, body, [class*="css"] {
 footer { visibility: hidden; }
 [data-testid="stDecoration"] { display: none; }
 [data-testid="stToolbar"] { display: none; }
+[data-testid="stSidebarCollapsedControl"] { display: flex !important; }
 
 /* App header */
 .app-header {
