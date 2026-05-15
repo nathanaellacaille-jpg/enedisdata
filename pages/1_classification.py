@@ -44,13 +44,13 @@ def _load_labels(file_bytes: bytes, file_name: str) -> dict:
     return parse_labels(io.BytesIO(file_bytes))
 
 
-@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json()})
+@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
 def _compute_features(df: pd.DataFrame) -> pd.DataFrame:
     """Calcule les features par compteur."""
     return extract_features(df)
 
 
-@st.cache_resource(hash_funcs={pd.DataFrame: lambda df: df.to_json()})
+@st.cache_resource(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
 def _train_model(features: pd.DataFrame, labels: dict):
     """Entraine le classifieur et retourne (model, X_test, y_test, y_pred)."""
     common = [mid for mid in features.index if str(mid) in labels]
