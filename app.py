@@ -1,7 +1,7 @@
 import streamlit as st
 from pathlib import Path
 
-st.set_page_config(page_title="Enedis Analytics", page_icon=None, layout="wide")
+st.set_page_config(page_title="Enedis Analytics", page_icon=None, layout="wide", initial_sidebar_state="expanded")
 
 # Charge le CSS global
 css_path = Path(__file__).parent / "assets" / "style.css"
