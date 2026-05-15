@@ -8,35 +8,40 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 
-def _ensure_package(name: str) -> None:
-    """Enregistre un package local dans sys.modules avec __path__ correct.
+def _preload(name: str, path: Path, is_pkg: bool = False) -> None:
+    """Charge un module dans sys.modules via importlib, sans instruction import.
 
-    Contourne KeyError: 'utils' sur Python 3.14 + Streamlit 1.57 où le runner
-    interne (_mpa_v1) execute app.py sans que les packages locaux soient dans
-    sys.modules, ce qui fait echouer l'import de sous-modules (utils.parser…).
+    Contourne le bug Python 3.14 + Streamlit 1.57 : le runner interne
+    (_mpa_v1 / page.py) execute app.py dans un contexte ou l'instruction
+    'import utils.parser' echoue systematiquement (KeyError ou 'not a package')
+    car Python ne peut pas resoudre les packages locaux depuis ce contexte.
+    En chargeant les fichiers directement avec spec_from_file_location on
+    court-circuite entierement le mecanisme d'import defaillant.
     """
     if name in sys.modules:
         return
     spec = importlib.util.spec_from_file_location(
-        name,
-        _root / name / "__init__.py",
-        submodule_search_locations=[str(_root / name)],
+        name, path,
+        submodule_search_locations=[str(path.parent)] if is_pkg else None,
     )
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
 
 
-_ensure_package("utils")
-_ensure_package("models")
-
-import utils.parser, utils.features, utils.metrics  # noqa: E401, F401
-import models.classifier, models.forecaster, models.generator  # noqa: E401, F401
+_preload("utils",             _root / "utils/__init__.py",       is_pkg=True)
+_preload("utils.parser",      _root / "utils/parser.py")
+_preload("utils.features",    _root / "utils/features.py")
+_preload("utils.metrics",     _root / "utils/metrics.py")
+_preload("models",            _root / "models/__init__.py",      is_pkg=True)
+_preload("models.classifier", _root / "models/classifier.py")
+_preload("models.forecaster", _root / "models/forecaster.py")
+_preload("models.generator",  _root / "models/generator.py")
 
 st.set_page_config(page_title="Enedis Analytics", page_icon=None, layout="wide", initial_sidebar_state="expanded")
 
 # Charge le CSS global
-css_path = Path(__file__).parent / "assets" / "style.css"
+css_path = _root / "assets" / "style.css"
 if css_path.exists():
     st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
