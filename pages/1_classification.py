@@ -354,49 +354,31 @@ with tab4:
     if clf is None or y_test is None or y_proba_test is None:
         st.caption("Chargez des labels pour evaluer les performances.")
     else:
-        # Métriques cross-validation 5 folds (estimation stable)
         if cv_scores is not None:
-            st.markdown("**Validation croisee — StratifiedKFold(5)**")
-            st.caption("Estimation sur la totalite des donnees labelisees (plus stable qu'un seul split).")
+            st.markdown("**Performances globales**")
             c1, c2, c3 = st.columns(3)
             c1.metric(
-                "Accuracy CV",
+                "Accuracy",
                 f"{cv_scores['accuracy']:.2%}",
                 f"± {cv_scores['accuracy_std']:.2%}",
                 delta_color="off",
             )
             c2.metric(
-                "F1 CV (pondere)",
+                "F1",
                 f"{cv_scores['f1']:.3f}",
                 f"± {cv_scores['f1_std']:.3f}",
                 delta_color="off",
             )
             c3.metric(
-                "Recall RS CV",
+                "Recall RS",
                 f"{cv_scores['recall_rs']:.2%}",
                 f"± {cv_scores['recall_rs_std']:.2%}",
                 delta_color="off",
             )
 
-        st.markdown("---")
-
-        # Seuil de classification ajustable
-        st.markdown("**Matrice de confusion — seuil ajustable**")
-        threshold = st.slider(
-            "Seuil RS (proba >= seuil → classe RS)",
-            min_value=0.30, max_value=0.70, value=0.50, step=0.01,
-            key="clf_threshold",
-        )
-        y_pred_thresh = (y_proba_test >= threshold).astype(int)
-        acc = accuracy_score(y_test, y_pred_thresh)
-        f1 = f1_score(y_test, y_pred_thresh, average="weighted", zero_division=0)
-        rec_rs = recall_score(y_test, y_pred_thresh, pos_label=1, zero_division=0)
-        cm = confusion_matrix(y_test, y_pred_thresh)
-
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Accuracy (test)", f"{acc:.2%}", delta_color="off")
-        m2.metric("F1 (pondere)", f"{f1:.3f}", delta_color="off")
-        m3.metric("Recall RS (test)", f"{rec_rs:.2%}", delta_color="off")
+        st.markdown("**Matrice de confusion**")
+        acc = accuracy_score(y_test, y_pred)
+        cm = confusion_matrix(y_test, y_pred)
 
         labels_names = ["RP", "RS"]
         fig_cm = go.Figure(go.Heatmap(
