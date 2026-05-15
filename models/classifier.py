@@ -16,7 +16,7 @@ class EnergyClassifier:
         self._pipe = Pipeline([
             ("scaler", StandardScaler()),
             ("pca", PCA(n_components=CLF_N_COMP_PCA, random_state=42)),
-            ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1)),
+            ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1, class_weight="balanced")),
         ])
         self._feature_names: list = []
 
