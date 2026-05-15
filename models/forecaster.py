@@ -89,11 +89,18 @@ class ARIMAForecaster:
         self._order = FCST_ARIMA_ORDER
 
     def fit(self, series: np.ndarray, order=FCST_ARIMA_ORDER):
-        """Ajuste un modele ARIMA(p,d,q) sur la serie."""
+        """Ajuste ARIMA(p,d,q), repli sur (1,1,1) si la convergence echoue."""
         from statsmodels.tsa.arima.model import ARIMA
+        from statsmodels.tools.sm_exceptions import ConvergenceWarning
+        import warnings
         self._order = order
-        model = ARIMA(series, order=order)
-        self._result = model.fit()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ConvergenceWarning)
+            try:
+                self._result = ARIMA(series, order=order).fit()
+            except (ConvergenceWarning, Exception):
+                self._order = (1, 1, 1)
+                self._result = ARIMA(series, order=(1, 1, 1)).fit()
         return self
 
     def predict(self, h: int) -> np.ndarray:
