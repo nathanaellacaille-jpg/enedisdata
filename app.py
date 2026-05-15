@@ -1,5 +1,8 @@
+import sys
 import streamlit as st
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
 
 st.set_page_config(page_title="Enedis Analytics", page_icon=None, layout="wide", initial_sidebar_state="expanded")
 
