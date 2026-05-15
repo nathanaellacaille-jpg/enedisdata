@@ -26,25 +26,6 @@ def make_fourier_features(n: int, n_harmonics: int = 3, period: int = 48, offset
     return np.column_stack(cols)
 
 
-def make_calendar_features(
-    n: int, offset: int = 0, start_ts: "pd.Timestamp | None" = None
-) -> np.ndarray:
-    """Features calendaires : is_weekend, sin/cos jour de semaine (encodage cyclique).
-
-    offset = indice absolu du premier point dans la série.
-    start_ts = timestamp du slot 0 de la série (ancrage jour de la semaine).
-    """
-    slots = np.arange(offset, offset + n)
-    if start_ts is not None:
-        anchor_dow = pd.Timestamp(start_ts).dayofweek  # 0=Lundi, 6=Dimanche
-        dow = (anchor_dow + slots // 48) % 7
-    else:
-        dow = (slots // 48) % 7  # relatif : suppose que la série commence un lundi
-    is_weekend = (dow >= 5).astype(float)
-    dow_sin = np.sin(2 * np.pi * dow / 7)
-    dow_cos = np.cos(2 * np.pi * dow / 7)
-    return np.column_stack([is_weekend, dow_sin, dow_cos])
-
 
 class RidgeForecaster:
     """Modele de prevision Ridge avec lags + features de Fourier."""
@@ -55,21 +36,18 @@ class RidgeForecaster:
         self.n_lags = n_lags
         self.n_fourier = n_fourier
         self._last_window: np.ndarray | None = None
-        self._start_ts: "pd.Timestamp | None" = None
 
     def _build_X(self, series: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Construit X et y depuis la serie."""
         lag_X = make_lag_features(series, self.n_lags)
         n = lag_X.shape[0]
         fourier_X = make_fourier_features(n, self.n_fourier, offset=self.n_lags)
-        cal_X = make_calendar_features(n, offset=self.n_lags, start_ts=self._start_ts)
-        X = np.hstack([lag_X, fourier_X, cal_X])
+        X = np.hstack([lag_X, fourier_X])
         y = series[self.n_lags:]
         return X, y
 
-    def fit(self, series: np.ndarray, y=None, start_ts: "pd.Timestamp | None" = None):
-        """Entraine Ridge sur la serie. start_ts = timestamp du slot 0 pour features calendaires."""
-        self._start_ts = pd.Timestamp(start_ts) if start_ts is not None else None
+    def fit(self, series: np.ndarray, y=None):
+        """Entraine Ridge sur la serie."""
         X, y_train = self._build_X(series)
         self._model.fit(X, y_train)
         self._last_window = series[-self.n_lags:].copy()
@@ -83,8 +61,7 @@ class RidgeForecaster:
         n_start = self._series_len
         for step in range(h):
             f_row = make_fourier_features(1, self.n_fourier, offset=n_start + step)[0]
-            cal_row = make_calendar_features(1, offset=n_start + step, start_ts=self._start_ts)[0]
-            x = np.hstack([window[::-1], f_row, cal_row]).reshape(1, -1)
+            x = np.hstack([window[::-1], f_row]).reshape(1, -1)
             y_hat = self._model.predict(x)[0]
             preds.append(y_hat)
             window = np.roll(window, -1)
@@ -97,8 +74,7 @@ class RidgeForecaster:
         fourier_names = []
         for k in range(1, self.n_fourier + 1):
             fourier_names += [f"sin_{k}", f"cos_{k}"]
-        cal_names = ["is_weekend", "dow_sin", "dow_cos"]
-        names = lag_names + fourier_names + cal_names
+        names = lag_names + fourier_names
         return pd.Series(self._model.coef_, index=names)
 
 
