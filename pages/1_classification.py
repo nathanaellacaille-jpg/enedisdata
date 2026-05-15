@@ -11,9 +11,6 @@ from utils.features import extract_features
 from utils.parser import parse_timeseries, parse_labels
 
 
-st.set_page_config(page_title="Classification", layout="wide", initial_sidebar_state="expanded")
-
-
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _plotly_base() -> dict:

@@ -9,9 +9,6 @@ from utils.metrics import compute_metrics
 from utils.parser import parse_timeseries
 
 
-st.set_page_config(page_title="Prevision", layout="wide", initial_sidebar_state="expanded")
-
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _plotly_base() -> dict:
