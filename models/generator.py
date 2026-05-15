@@ -44,7 +44,7 @@ class CurveGenerator:
             profile = sub.groupby("slot")["kw"].mean().reindex(range(STEPS_PER_DAY), fill_value=0.0).values
             if profile.max() > 0:
                 self._profiles[label_name] = profile / profile.max()
-                self._scales[label_name] = sub.groupby("slot")["kw"].mean().max()
+                self._scales[label_name] = float(sub.groupby("slot")["kw"].mean().max())
             # Calibration ecart-type par slot sur donnees reelles
             pivot = sub.pivot_table(index="ts", columns="meter_id", values="kw")
             pivot = pivot.copy()
