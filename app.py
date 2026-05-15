@@ -4,6 +4,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Pre-import local packages pour contourner KeyError Python 3.14 + Streamlit 1.57
+import utils.parser, utils.features, utils.metrics  # noqa: E401, F401
+import models.classifier, models.forecaster, models.generator  # noqa: E401, F401
+
 st.set_page_config(page_title="Enedis Analytics", page_icon=None, layout="wide", initial_sidebar_state="expanded")
 
 # Charge le CSS global
