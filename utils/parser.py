@@ -54,7 +54,7 @@ def parse_timeseries(file, max_meters: int = MAX_METERS_UPLOAD) -> pd.DataFrame:
     df = pd.concat(chunks, ignore_index=True)
     df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
     df = df.dropna(subset=["ts"])
-    df["kw"] = pd.to_numeric(df["kw"], errors="coerce").fillna(0.0).astype("float64")
+    df["kw"] = pd.to_numeric(df["kw"], errors="coerce").fillna(0.0).astype("float32")
     df = df[["meter_id", "ts", "kw"]].sort_values(["meter_id", "ts"]).reset_index(drop=True)
     return df
 
