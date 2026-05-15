@@ -1,10 +1,17 @@
 import sys
+import types
+import importlib
 import streamlit as st
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Pre-import local packages pour contourner KeyError Python 3.14 + Streamlit 1.57
+# Fix Python 3.14 + Streamlit : sys.modules ne pre-enregistre pas les packages
+# locaux dans le contexte exec() de Streamlit, ce qui provoque KeyError: 'utils'
+for _pkg in ("utils", "models"):
+    if _pkg not in sys.modules:
+        sys.modules[_pkg] = types.ModuleType(_pkg)
+
 import utils.parser, utils.features, utils.metrics  # noqa: E401, F401
 import models.classifier, models.forecaster, models.generator  # noqa: E401, F401
 
