@@ -1,8 +1,8 @@
-streamlit>=1.35.0
-pandas>=2.0.0
-numpy>=1.26.0
-scikit-learn>=1.4.0
+streamlit==1.57.0
+pandas>=3.0,<4
+numpy>=2.0,<3
+scikit-learn>=1.8,<2
 plotly>=5.20.0
-statsmodels>=0.14.0
+statsmodels>=0.14.0,<1.0
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch>=2.2.0
