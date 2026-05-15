@@ -126,9 +126,12 @@ class LSTMForecaster:
         self.losses: list = []
 
     def fit(self, series: np.ndarray, callback=None):
-        """Entraine le LSTM sur la serie normalisee."""
-        import torch
-        import torch.nn as nn
+        """Entraine le LSTM sur la serie normalisee. Leve RuntimeError si torch indisponible."""
+        try:
+            import torch
+            import torch.nn as nn
+        except Exception as exc:
+            raise RuntimeError("PyTorch non disponible sur cette instance.") from exc
 
         self._scaler_mean = series.mean()
         self._scaler_std = series.std() + 1e-8
