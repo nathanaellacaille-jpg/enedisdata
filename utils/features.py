@@ -49,6 +49,35 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
     weekly_energy = grp.groupby("week")["kw"].sum() * 0.5
     cv_weekly = (weekly_energy.std() / weekly_energy.mean()) if weekly_energy.mean() > 0 else 0.0
 
+    # zero_ratio : proportion de slots quasi nuls (RS = longues absences)
+    series_kw = grp["kw"].values
+    zero_ratio = float((series_kw < 0.05).mean())
+
+    # autocorr_lag48 : autocorrélation à j-1 (RS a des transitions brusques zéro/non-zéro)
+    if len(series_kw) > 48:
+        x1, x2 = series_kw[48:], series_kw[:-48]
+        denom = x1.std() * x2.std()
+        autocorr_lag48 = float(np.corrcoef(x1, x2)[0, 1]) if denom > 1e-8 else 0.0
+    else:
+        autocorr_lag48 = 0.0
+
+    # max_gap_days : plus longue séquence de jours consécutifs à conso < 0.5 kWh (absence RS)
+    absent = (daily < 0.5).values
+    max_gap = 0
+    cur = 0
+    for v in absent:
+        if v:
+            cur += 1
+            if cur > max_gap:
+                max_gap = cur
+        else:
+            cur = 0
+    max_gap_days = max_gap
+
+    # skewness : asymétrie de la distribution (RS : beaucoup de zéros + pics rares → fortement asymétrique)
+    _std = series_kw.std()
+    skewness = float(((series_kw - series_kw.mean()) ** 3).mean() / (_std ** 3)) if _std > 1e-8 else 0.0
+
     # Profil moyen sur 48 slots
     grp["slot"] = (grp["ts"].dt.hour * 2 + grp["ts"].dt.minute // 30)
     mean_profile = grp.groupby("slot")["kw"].mean().reindex(range(STEPS_PER_DAY), fill_value=0.0).values
@@ -63,6 +92,10 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
         "morning_ratio": morning_ratio,
         "seasonal_ratio": seasonal_ratio,
         "cv_weekly": cv_weekly,
+        "zero_ratio": zero_ratio,
+        "autocorr_lag48": autocorr_lag48,
+        "max_gap_days": max_gap_days,
+        "skewness": skewness,
         "fourier_amp_1": f1,
         "fourier_amp_2": f2,
         "fourier_amp_3": f3,
