@@ -14,7 +14,7 @@ class EnergyClassifier:
         """Initialise le pipeline de classification."""
         self._pipe = Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1, class_weight="balanced")),
+            ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1)),
         ])
         self._feature_names: list = []
 
