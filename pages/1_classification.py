@@ -16,16 +16,16 @@ from utils.parser import parse_timeseries, parse_labels
 def _plotly_base() -> dict:
     """Retourne le layout de base pour les graphiques Plotly."""
     return dict(
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor=PAL.WHITE,
+        paper_bgcolor=PAL.WHITE,
         font=dict(family="Inter, sans-serif", size=12, color=PAL.TEXT),
         legend=dict(
             orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
             font=dict(size=11), bgcolor="rgba(0,0,0,0)", borderwidth=0,
         ),
-        xaxis=dict(gridcolor="#F1F5F9", linecolor=PAL.BORDER,
+        xaxis=dict(gridcolor=PAL.RP_soft, linecolor=PAL.BORDER,
                    tickfont=dict(size=11, color=PAL.TEXT_MUTED)),
-        yaxis=dict(gridcolor="#F1F5F9", linecolor=PAL.BORDER,
+        yaxis=dict(gridcolor=PAL.RP_soft, linecolor=PAL.BORDER,
                    tickfont=dict(size=11, color=PAL.TEXT_MUTED)),
     )
 
@@ -213,8 +213,8 @@ with tab1:
                 "axis": {"range": [0, 100], "tickfont": {"size": 10, "color": PAL.TEXT_MUTED}},
                 "bar": {"color": PAL.TEXT, "thickness": 0.25},
                 "steps": [
-                    {"range": [0, 33], "color": "#F8FAFC"},
-                    {"range": [33, 66], "color": "#E2E8F0"},
+                    {"range": [0, 33], "color": PAL.GRID},
+                    {"range": [33, 66], "color": PAL.BORDER},
                     {"range": [66, 100], "color": PAL.TEXT},
                 ],
                 "borderwidth": 0,
@@ -222,7 +222,7 @@ with tab1:
             },
         ))
         fig_gauge.update_layout(
-            plot_bgcolor="white", paper_bgcolor="white",
+            plot_bgcolor=PAL.WHITE, paper_bgcolor=PAL.WHITE,
             margin=dict(l=16, r=16, t=32, b=16),
             font=dict(family="Inter, sans-serif", size=12, color=PAL.TEXT),
             height=220,
@@ -281,7 +281,7 @@ with tab2:
             z=corr.values,
             x=list(corr.columns),
             y=list(corr.index),
-            colorscale=[[0, "#FFFFFF"], [0.5, "#94A3B8"], [1, "#0F172A"]],
+            colorscale=[[0, PAL.WHITE], [0.5, PAL.LSTM], [1, PAL.TEXT]],
             zmin=-1, zmax=1,
         ))
         fig_corr.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Correlation features")
@@ -385,7 +385,7 @@ with tab4:
             z=cm,
             x=labels_names,
             y=labels_names,
-            colorscale=[[0, "#FFFFFF"], [0.5, "#94A3B8"], [1, "#0F172A"]],
+            colorscale=[[0, PAL.WHITE], [0.5, PAL.LSTM], [1, PAL.TEXT]],
             showscale=True,
             text=cm.astype(str),
             texttemplate="%{text}",

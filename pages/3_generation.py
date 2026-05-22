@@ -14,16 +14,16 @@ from utils.parser import parse_timeseries, parse_labels
 def _plotly_base() -> dict:
     """Retourne le layout de base pour les graphiques Plotly."""
     return dict(
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor=PAL.WHITE,
+        paper_bgcolor=PAL.WHITE,
         font=dict(family="Inter, sans-serif", size=12, color=PAL.TEXT),
         legend=dict(
             orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
             font=dict(size=11), bgcolor="rgba(0,0,0,0)", borderwidth=0,
         ),
-        xaxis=dict(gridcolor="#F1F5F9", linecolor=PAL.BORDER,
+        xaxis=dict(gridcolor=PAL.RP_soft, linecolor=PAL.BORDER,
                    tickfont=dict(size=11, color=PAL.TEXT_MUTED)),
-        yaxis=dict(gridcolor="#F1F5F9", linecolor=PAL.BORDER,
+        yaxis=dict(gridcolor=PAL.RP_soft, linecolor=PAL.BORDER,
                    tickfont=dict(size=11, color=PAL.TEXT_MUTED)),
     )
 
@@ -273,7 +273,7 @@ with tab4:
         z=pivot.values,
         x=[str(c) for c in pivot.columns],
         y=pivot.index.tolist(),
-        colorscale=[[0, "#FFFFFF"], [0.5, "#94A3B8"], [1, "#0F172A"]],
+        colorscale=[[0, PAL.WHITE], [0.5, PAL.LSTM], [1, PAL.TEXT]],
     ))
     fig_heat.update_layout(
         **_plotly_base(),

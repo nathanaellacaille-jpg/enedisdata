@@ -99,10 +99,12 @@ class CurveGenerator:
         return scores
 
     def profile_stats(self) -> dict:
-        """Energie moyenne et std par type."""
+        """Energie moyenne et std estimee par type (std via variance du day_factor)."""
         stats = {}
         for name, profile in self._profiles.items():
             scale = self._scales[name]
-            daily_energy = float(profile.sum() * float(scale) * 0.5)
-            stats[name] = {"mean_kwh_day": round(daily_energy, 2), "std": 0.0}
+            mean_kwh = float(profile.sum() * float(scale) * 0.5)
+            # day_factor ~ N(1, GEN_NOISE_STD*0.5) → std energie = mean * GEN_NOISE_STD*0.5
+            std_kwh = mean_kwh * GEN_NOISE_STD * 0.5
+            stats[name] = {"mean_kwh_day": round(mean_kwh, 2), "std": round(std_kwh, 2)}
         return stats

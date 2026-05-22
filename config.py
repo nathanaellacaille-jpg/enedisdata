@@ -20,6 +20,7 @@ class Palette:
     BORDER: str = "#E2E8F0"
     TEXT: str = "#0F172A"
     TEXT_MUTED: str = "#64748B"
+    WHITE: str = "#FFFFFF"
     MULTI: List[str] = field(default_factory=lambda: [
         "#0F172A", "#1E293B", "#334155", "#475569",
         "#64748B", "#94A3B8", "#CBD5E1", "#E2E8F0",
