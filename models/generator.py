@@ -23,21 +23,25 @@ class CurveGenerator:
         self._scales = {"RP": 3.0, "RS": 1.2}
         # Spread log-normal de l'amplitude entre compteurs (calibré par fit)
         self._scale_log_std = {"RP": 0.3, "RS": 0.3}
+        # Jitter de timing du pic entre compteurs (en slots), calibre par fit
+        self._peak_jitter_slots = {"RP": 0.0, "RS": 0.0}
         self.noise_std_by_slot = {
             "RS": np.full(STEPS_PER_DAY, GEN_NOISE_STD),
             "RP": np.full(STEPS_PER_DAY, GEN_NOISE_STD),
         }
 
     def fit(self, df: pd.DataFrame, labels: dict | None) -> "CurveGenerator":
-        """Calibre profils et bruit par classe sur donnees reelles.
+        """Calibre profils, scale et bruit par classe sur donnees reelles.
 
         Strategie :
-        - Chaque compteur est normalise sur son propre pic → forme pure [0,1].
-        - Le profil de classe = moyenne de ces formes (non biaisee par l'amplitude).
-        - L'echelle = mediane des pics individuels (robuste aux outliers).
-        - La diversite d'amplitude est capturee par un spread log-normal calibre.
-        - Le bruit AR(1) = variabilite de kw_normalise par slot → espace [0,1],
-          sans pollution par l'heterogeneite inter-compteurs.
+        - Profil de classe = moyenne des formes normalisees au pic, puis
+          'sharpening' (profile ** alpha) pour matcher le ratio peak/energy
+          reel (le profil moyen est mecaniquement plus plat que les profils
+          individuels → energie surestimee a pic fixe sans sharpening).
+        - Scale calibre sur l'energie journaliere mediane (pas le pic), pour
+          que les courbes generees aient la bonne consommation totale.
+        - Diversite d'amplitude = log-normal fit sur les energies par compteur.
+        - Bruit AR(1) = variabilite intra-compteur en espace normalise [0,1].
         """
         if df is None or labels is None:
             return self
@@ -48,13 +52,26 @@ class CurveGenerator:
                 continue
             sub = sub.copy()
             sub["slot"] = sub["ts"].dt.hour * 2 + sub["ts"].dt.minute // 30
+            sub["date"] = sub["ts"].dt.date
 
-            # Pic moyen par compteur (sur le profil slot-moyen)
+            # Pic et energie journaliers par (compteur, date), agreges en mediane par compteur
             slot_means = sub.groupby(["meter_id", "slot"])["kw"].mean()
-            meter_peaks = slot_means.groupby("meter_id").max()
-            valid = meter_peaks[meter_peaks > 0].index
+            daily_stats = sub.groupby(["meter_id", "date"]).agg(
+                peak=("kw", "max"), energy_half=("kw", "sum")
+            )
+            daily_stats["energy"] = daily_stats["energy_half"] * 0.5
+            meter_peaks_daily = daily_stats.groupby("meter_id")["peak"].median()
+            meter_energy = daily_stats.groupby("meter_id")["energy"].median()
+            # On normalise toujours par le pic-of-slot-means pour la forme (lisse, robuste)
+            meter_peaks_smooth = slot_means.groupby("meter_id").max()
+            valid = meter_peaks_smooth[
+                (meter_peaks_smooth > 0)
+                & (meter_peaks_daily.reindex(meter_peaks_smooth.index) > 0)
+                & (meter_energy.reindex(meter_peaks_smooth.index) > 0)
+            ].index
             if valid.empty:
                 continue
+            meter_peaks = meter_peaks_smooth  # alias conserve pour la suite
 
             # Tableau (n_compteurs × 48) des profils normalisés au pic de chaque compteur
             norm_matrix = (
@@ -65,16 +82,46 @@ class CurveGenerator:
                 .values
             )  # shape (n_valid, 48), valeurs dans [0, 1]
 
-            # Profil de classe = moyenne des formes normalisées, re-normalisée au max
             mean_shape = norm_matrix.mean(axis=0)
-            if mean_shape.max() > 0:
-                self._profiles[label_name] = mean_shape / mean_shape.max()
+            if mean_shape.max() <= 0:
+                continue
+            mean_shape = mean_shape / mean_shape.max()
 
-            # Échelle = médiane des pics individuels ; spread log-normal pour generate()
-            peaks_arr = meter_peaks[valid].values
-            self._scales[label_name] = float(np.median(peaks_arr))
+            # Sharpening : profile ** alpha + plancher additif calibre pour que
+            # sum(profile)*0.5 == median(energy) / median(peak_journalier).
+            # Le pic-cible est le pic median d'une journee individuelle (pas le pic
+            # moyen-temporel). Le plancher (~1 % du pic) modelise la consommation
+            # toujours allumee → evite la sur-occurrence de slots a zero.
+            FLOOR = 0.01
+            median_peak = float(np.median(meter_peaks_daily[valid].values))
+            median_energy = float(np.median(meter_energy[valid].values))
+            target_sum_half = median_energy / max(median_peak, 1e-9)
+            alpha_grid = np.linspace(0.5, 25.0, 246)
+
+            def _sharpen(p, a):
+                q = np.maximum(p ** a, FLOOR)
+                return q / q.max()
+
+            sums_half = np.array([_sharpen(mean_shape, a).sum() * 0.5 for a in alpha_grid])
+            alpha = float(alpha_grid[np.argmin(np.abs(sums_half - target_sum_half))])
+            self._profiles[label_name] = _sharpen(mean_shape, alpha)
+
+            # Jitter de timing : std des positions de pic des compteurs reels,
+            # restreint a la plage typique du pic du soir (15h-23h = slots 30-46)
+            # pour ignorer les compteurs sans pic structure (argmax aberrant).
+            # Permet a generate() de decaler le profil de chaque courbe pour que
+            # la moyenne de N courbes generees reproduise le lissage temporel reel.
+            peak_slots = norm_matrix.argmax(axis=1)
+            in_evening = (peak_slots >= 30) & (peak_slots <= 46)
+            jitter_std = float(np.std(peak_slots[in_evening])) if in_evening.any() else 2.0
+            self._peak_jitter_slots[label_name] = float(np.clip(jitter_std, 1.0, 4.0))
+
+            # Scale calibre sur l'energie (apres sharpening), log-normal sur energies
+            profile_sum_half = float(self._profiles[label_name].sum() * 0.5)
+            required_scales = meter_energy[valid].values / max(profile_sum_half, 1e-9)
+            self._scales[label_name] = float(np.median(required_scales))
             self._scale_log_std[label_name] = float(
-                np.clip(np.std(np.log(peaks_arr + 1e-9)), 0.05, 1.5)
+                np.clip(np.std(np.log(required_scales + 1e-9)), 0.05, 1.5)
             )
 
             # Bruit : pattern relatif intra-compteur par slot
@@ -82,8 +129,6 @@ class CurveGenerator:
             # 2) moyenne sur les compteurs → pattern typique en espace [0,1]
             # 3) normalisation au mean=1 → patron relatif (quels slots sont plus bruités)
             # 4) mise à l'échelle par GEN_NOISE_STD → niveau conservateur pour courbes lisibles
-            # La variabilité absolue du dataset (0.5-0.8 normalisé) est intentionnellement
-            # ignorée : on veut des courbes représentatives, pas des tirages aléatoires bruts.
             sub_v = sub[sub["meter_id"].isin(valid)].copy()
             sub_v["meter_peak"] = sub_v["meter_id"].map(meter_peaks)
             sub_v["kw_norm"] = sub_v["kw"] / sub_v["meter_peak"]
@@ -122,8 +167,13 @@ class CurveGenerator:
                 ct = "RS" if i % 2 == 0 else "RP"
             else:
                 ct = curve_type
-            profile = self._profiles[ct]
             slot_stds = self.noise_std_by_slot[ct] * noise_ratio
+
+            # Decalage de timing par courbe : reproduit l'etalement temporel des
+            # pics entre compteurs sans aplatir le profil individuel.
+            jitter = self._peak_jitter_slots[ct]
+            offset = int(round(np.random.normal(0, jitter))) if jitter > 0 else 0
+            profile = np.roll(self._profiles[ct], offset)
 
             # Amplitude log-normale propre à cette courbe (diversité inter-compteurs)
             log_mean = np.log(max(self._scales[ct], 1e-9))
@@ -147,7 +197,11 @@ class CurveGenerator:
                     innov = np.random.normal(0, float(slot_stds[t]) * innov_scale)
                     ar_noise[t] = GEN_NOISE_RHO * ar_noise[t - 1] + innov
                 for slot in range(STEPS_PER_DAY):
-                    raw = (profile[slot] + ar_noise[slot]) * scale * day_factor
+                    # Bruit multiplicatif : variabilite proportionnelle au profil.
+                    # Un foyer en veille (baseline) varie peu en absolu ; un foyer
+                    # en pic varie davantage. Evite aussi le clipping a 0 quand
+                    # le profil est tres bas.
+                    raw = profile[slot] * (1.0 + ar_noise[slot]) * scale * day_factor
                     # Clip [0, 4×scale] : protège contre spikes extrêmes
                     kw = float(np.clip(raw, 0.0, scale * 4.0))
                     records.append({
