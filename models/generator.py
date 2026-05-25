@@ -24,14 +24,25 @@ class CurveGenerator:
             "RP": _make_rp_profile(),
             "RS": _make_rs_profile(),
         }
-        self._scales = {"RP": 3.0, "RS": 1.2}  # kW amplitude reference
+        self._scales = {"RP": 3.0, "RS": 1.2}
+        # Spread log-normal de l'amplitude entre compteurs (calibré par fit)
+        self._scale_log_std = {"RP": 0.3, "RS": 0.3}
         self.noise_std_by_slot = {
             "RS": np.full(STEPS_PER_DAY, GEN_NOISE_STD),
             "RP": np.full(STEPS_PER_DAY, GEN_NOISE_STD),
         }
 
     def fit(self, df: pd.DataFrame, labels: dict | None) -> "CurveGenerator":
-        """Calcule profils moyens par classe. Fallback sur profils de reference si labels=None."""
+        """Calibre profils et bruit par classe sur donnees reelles.
+
+        Strategie :
+        - Chaque compteur est normalise sur son propre pic → forme pure [0,1].
+        - Le profil de classe = moyenne de ces formes (non biaisee par l'amplitude).
+        - L'echelle = mediane des pics individuels (robuste aux outliers).
+        - La diversite d'amplitude est capturee par un spread log-normal calibre.
+        - Le bruit AR(1) = variabilite de kw_normalise par slot → espace [0,1],
+          sans pollution par l'heterogeneite inter-compteurs.
+        """
         if df is None or labels is None:
             return self
         for label_val, label_name in [(0, "RP"), (1, "RS")]:
@@ -41,22 +52,69 @@ class CurveGenerator:
                 continue
             sub = sub.copy()
             sub["slot"] = sub["ts"].dt.hour * 2 + sub["ts"].dt.minute // 30
-            profile = sub.groupby("slot")["kw"].mean().reindex(range(STEPS_PER_DAY), fill_value=0.0).values
-            if profile.max() > 0:
-                self._profiles[label_name] = profile / profile.max()
-                self._scales[label_name] = float(sub.groupby("slot")["kw"].mean().max())
-            # Calibration ecart-type par slot sur donnees reelles
-            pivot = sub.pivot_table(index="ts", columns="meter_id", values="kw")
-            pivot = pivot.copy()
-            pivot["slot"] = np.arange(len(pivot)) % STEPS_PER_DAY
-            slot_std = pivot.groupby("slot").std().mean(axis=1)
-            self.noise_std_by_slot[label_name] = (
-                slot_std.reindex(range(STEPS_PER_DAY), fill_value=GEN_NOISE_STD).values
+
+            # Pic moyen par compteur (sur le profil slot-moyen)
+            slot_means = sub.groupby(["meter_id", "slot"])["kw"].mean()
+            meter_peaks = slot_means.groupby("meter_id").max()
+            valid = meter_peaks[meter_peaks > 0].index
+            if valid.empty:
+                continue
+
+            # Tableau (n_compteurs × 48) des profils normalisés au pic de chaque compteur
+            norm_matrix = (
+                slot_means.loc[valid]
+                .unstack("slot")
+                .reindex(columns=range(STEPS_PER_DAY), fill_value=0.0)
+                .div(meter_peaks[valid], axis=0)
+                .values
+            )  # shape (n_valid, 48), valeurs dans [0, 1]
+
+            # Profil de classe = moyenne des formes normalisées, re-normalisée au max
+            mean_shape = norm_matrix.mean(axis=0)
+            if mean_shape.max() > 0:
+                self._profiles[label_name] = mean_shape / mean_shape.max()
+
+            # Échelle = médiane des pics individuels ; spread log-normal pour generate()
+            peaks_arr = meter_peaks[valid].values
+            self._scales[label_name] = float(np.median(peaks_arr))
+            self._scale_log_std[label_name] = float(
+                np.clip(np.std(np.log(peaks_arr + 1e-9)), 0.05, 1.5)
             )
+
+            # Bruit : pattern relatif intra-compteur par slot
+            # 1) std de kw_norm par (meter_id, slot) → variabilité jour/jour propre à chaque compteur
+            # 2) moyenne sur les compteurs → pattern typique en espace [0,1]
+            # 3) normalisation au mean=1 → patron relatif (quels slots sont plus bruités)
+            # 4) mise à l'échelle par GEN_NOISE_STD → niveau conservateur pour courbes lisibles
+            # La variabilité absolue du dataset (0.5-0.8 normalisé) est intentionnellement
+            # ignorée : on veut des courbes représentatives, pas des tirages aléatoires bruts.
+            sub_v = sub[sub["meter_id"].isin(valid)].copy()
+            sub_v["meter_peak"] = sub_v["meter_id"].map(meter_peaks)
+            sub_v["kw_norm"] = sub_v["kw"] / sub_v["meter_peak"]
+            intra_std = (
+                sub_v.groupby(["meter_id", "slot"])["kw_norm"]
+                .std()
+                .groupby("slot")
+                .mean()
+                .reindex(range(STEPS_PER_DAY), fill_value=GEN_NOISE_STD)
+            )
+            mean_intra = intra_std.mean()
+            rel_pattern = intra_std / max(mean_intra, 1e-9)   # normalisé, mean≈1.0
+            self.noise_std_by_slot[label_name] = np.clip(
+                GEN_NOISE_STD * rel_pattern.values, 0.0, 0.20
+            )
+
         return self
 
     def generate(self, n: int, curve_type: str, n_days: int = 7, noise_std: float = GEN_NOISE_STD) -> pd.DataFrame:
-        """Genere n courbes sur n_days. curve_type in {'RS','RP','mixed'}."""
+        """Genere n courbes sur n_days. curve_type in {'RS','RP','mixed'}.
+
+        Chaque courbe tire sa propre amplitude dans la distribution log-normale
+        calibree par fit() → diversite realiste des niveaux de consommation.
+        Le parametre noise_std scale le bruit AR(1) et le facteur journalier.
+        """
+        # Ratio par rapport au niveau de bruit par defaut (controle UI)
+        noise_ratio = noise_std / max(GEN_NOISE_STD, 1e-9)
         records = []
         for i in range(n):
             if curve_type == "mixed":
@@ -64,11 +122,23 @@ class CurveGenerator:
             else:
                 ct = curve_type
             profile = self._profiles[ct]
-            scale = self._scales[ct]
-            slot_stds = self.noise_std_by_slot[ct]
+            slot_stds = self.noise_std_by_slot[ct] * noise_ratio
+
+            # Amplitude log-normale propre à cette courbe (diversité inter-compteurs)
+            log_mean = np.log(max(self._scales[ct], 1e-9))
+            scale = float(np.clip(
+                np.exp(np.random.normal(log_mean, self._scale_log_std[ct])),
+                self._scales[ct] * 0.05,
+                self._scales[ct] * 8.0,
+            ))
+
             for day in range(n_days):
-                day_factor = 1.0 + np.random.normal(0, noise_std * 0.5)
-                # Bruit AR(1) : corrélation temporelle entre slots consécutifs
+                # Facteur journalier borné : ±~15 % autour de 1 au niveau de bruit par défaut
+                day_factor = float(np.clip(
+                    1.0 + np.random.normal(0, noise_std * 0.3),
+                    0.3, 2.0,
+                ))
+                # Bruit AR(1) en espace normalisé [0,1]
                 ar_noise = np.zeros(STEPS_PER_DAY)
                 ar_noise[0] = np.random.normal(0, float(slot_stds[0]))
                 innov_scale = np.sqrt(1.0 - GEN_NOISE_RHO ** 2)
@@ -76,7 +146,9 @@ class CurveGenerator:
                     innov = np.random.normal(0, float(slot_stds[t]) * innov_scale)
                     ar_noise[t] = GEN_NOISE_RHO * ar_noise[t - 1] + innov
                 for slot in range(STEPS_PER_DAY):
-                    kw = max(0.0, (profile[slot] + ar_noise[slot]) * scale * day_factor)
+                    raw = (profile[slot] + ar_noise[slot]) * scale * day_factor
+                    # Clip [0, 4×scale] : protège contre spikes extrêmes
+                    kw = float(np.clip(raw, 0.0, scale * 4.0))
                     records.append({
                         "curve_id": i,
                         "day": day,
