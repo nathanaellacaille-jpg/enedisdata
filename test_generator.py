@@ -166,15 +166,32 @@ check(std_high > std_low,
       f"noise_std sans effet ({std_high:.4f} <= {std_low:.4f})")
 
 
-# ── 8. quality_scores DTW ────────────────────────────────────────────
-section("8. quality_scores (DTW)")
+# ── 8. similarity_report ─────────────────────────────────────────────
+section("8. similarity_report (validation vs donnees reelles)")
 np.random.seed(1)
-small  = gen.generate(n=10, curve_type="mixed", n_days=3)
-scores = gen.quality_scores(small)
-print(f"  DTW : {scores}")
-for ct, val in scores.items():
-    limit = gen._scales[ct] * STEPS_PER_DAY * 0.8
-    check(0 < val < limit, f"{ct}: DTW={val:.3f} < {limit:.1f}")
+for ct in ("RP", "RS"):
+    small = gen.generate(n=20, curve_type=ct, n_days=7)
+    rep = gen.similarity_report(df, labels, small, ct)
+    print(f"\n  {ct}:")
+    print(f"    has_real         = {rep['has_real']}")
+    print(f"    pearson_profile  = {rep['pearson_profile']:.3f}")
+    print(f"    wasserstein_kWh  = {rep['wasserstein_energy']:.3f}")
+    print(f"    energie reel/gen = {rep['mean_energy_real']:.2f} / {rep['mean_energy_gen']:.2f} kWh")
+    print(f"    pic     reel/gen = {rep['peak_real']:.2f} / {rep['peak_gen']:.2f} kW")
+    print(f"    we_ratio reel/gen= {rep['we_ratio_real']:.2f} / {rep['we_ratio_gen']:.2f}")
+    check(rep["has_real"], f"{ct}: has_real True quand donnees fournies")
+    check(rep["pearson_profile"] > 0.85,
+          f"{ct}: forme correlee (pearson={rep['pearson_profile']:.3f} > 0.85)",
+          f"{ct}: forme decorrelee (pearson={rep['pearson_profile']:.3f})")
+    check(rep["wasserstein_energy"] >= 0, f"{ct}: wasserstein >= 0")
+    check(rep["profile_real"].shape == (STEPS_PER_DAY,), f"{ct}: profile_real shape OK")
+    check(rep["profile_gen"].shape == (STEPS_PER_DAY,), f"{ct}: profile_gen shape OK")
+
+# Sans donnees reelles : has_real=False mais stats gen presentes
+rep_no = gen.similarity_report(None, None, small, "RS")
+check(not rep_no["has_real"], "has_real=False sans donnees reelles")
+check(rep_no["pearson_profile"] is None, "pearson_profile None sans reel")
+check(rep_no["mean_energy_gen"] > 0, "mean_energy_gen calcule meme sans reel")
 
 
 # ── 9. profile_stats ─────────────────────────────────────────────────

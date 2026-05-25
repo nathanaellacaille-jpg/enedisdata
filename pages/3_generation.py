@@ -1,10 +1,10 @@
-import json
+import io
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, GEN_DEFAULT_N, GEN_NOISE_STD, MAX_METERS_UPLOAD, _make_rp_profile, _make_rs_profile
+from config import PAL, GEN_DEFAULT_N, GEN_NOISE_STD, MAX_METERS_UPLOAD, STEPS_PER_DAY
 from models.generator import CurveGenerator
 from utils.parser import parse_timeseries, parse_labels
 
@@ -12,7 +12,7 @@ from utils.parser import parse_timeseries, parse_labels
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _plotly_base() -> dict:
-    """Retourne le layout de base pour les graphiques Plotly."""
+    """Layout Plotly minimal partage par tous les graphiques."""
     return dict(
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -28,24 +28,9 @@ def _plotly_base() -> dict:
     )
 
 
-@st.cache_data
-def _load_ts(file_bytes: bytes, file_name: str) -> pd.DataFrame:
-    """Charge le CSV timeseries."""
-    import io
-    return parse_timeseries(io.BytesIO(file_bytes), max_meters=MAX_METERS_UPLOAD)
-
-
-@st.cache_data
-def _load_labels(file_bytes: bytes, file_name: str) -> dict:
-    """Charge le CSV labels."""
-    import io
-    return parse_labels(io.BytesIO(file_bytes))
-
-
 @st.cache_resource
 def _fit_generator(ts_key: str, lbl_key: str, ts_bytes: bytes | None, lbl_bytes: bytes | None) -> CurveGenerator:
-    """Cree et entraine le generateur."""
-    import io
+    """Cree et entraine le generateur (cache sur cles d'upload)."""
     gen = CurveGenerator()
     df = parse_timeseries(io.BytesIO(ts_bytes), max_meters=MAX_METERS_UPLOAD) if ts_bytes else None
     labels = parse_labels(io.BytesIO(lbl_bytes)) if lbl_bytes else None
@@ -54,11 +39,23 @@ def _fit_generator(ts_key: str, lbl_key: str, ts_bytes: bytes | None, lbl_bytes:
 
 
 @st.cache_data
-def _generate(ts_key: str, lbl_key: str, n: int, curve_type: str, n_days: int, noise: float,
+def _load_real(ts_bytes: bytes, ts_key: str) -> pd.DataFrame:
+    """Charge la timeseries reelle pour la validation."""
+    return parse_timeseries(io.BytesIO(ts_bytes), max_meters=MAX_METERS_UPLOAD)
+
+
+@st.cache_data
+def _load_labels_dict(lbl_bytes: bytes, lbl_key: str) -> dict:
+    """Charge le dict de labels meter_id -> int."""
+    return parse_labels(io.BytesIO(lbl_bytes))
+
+
+@st.cache_data
+def _generate(ts_key: str, lbl_key: str, n: int, curve_type: str, n_days: int,
               ts_bytes: bytes | None, lbl_bytes: bytes | None) -> pd.DataFrame:
-    """Genere les courbes et retourne le dataframe."""
+    """Genere n courbes (cache sur tous les inputs)."""
     gen = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
-    return gen.generate(n, curve_type, n_days, noise)
+    return gen.generate(n, curve_type, n_days, GEN_NOISE_STD)
 
 
 # ── sidebar ───────────────────────────────────────────────────────────────────
@@ -68,31 +65,13 @@ with st.sidebar:
     ts_file = st.file_uploader("Timeseries CSV", type=["csv"], key="gen_ts")
     lbl_file = st.file_uploader("Labels CSV", type=["csv"], key="gen_lbl")
 
-    if ts_file is not None:
-        if st.session_state.get("_gen_ts_file_name") != ts_file.name:
-            try:
-                ts_bytes_new = ts_file.getvalue()
-                st.session_state["_gen_ts_df"] = _load_ts(ts_bytes_new, ts_file.name)
-                st.session_state["_gen_ts_bytes"] = ts_bytes_new
-                st.session_state["_gen_ts_file_name"] = ts_file.name
-            except ValueError as e:
-                st.error(str(e))
+    if ts_file is not None and st.session_state.get("_gen_ts_file_name") != ts_file.name:
+        st.session_state["_gen_ts_bytes"] = ts_file.getvalue()
+        st.session_state["_gen_ts_file_name"] = ts_file.name
 
-    if lbl_file is not None:
-        if st.session_state.get("_gen_labels_file_name") != lbl_file.name:
-            try:
-                lbl_bytes_new = lbl_file.getvalue()
-                st.session_state["_gen_lbl_bytes"] = lbl_bytes_new
-                st.session_state["_gen_labels_file_name"] = lbl_file.name
-            except ValueError as e:
-                st.error(str(e))
-
-    st.markdown("**Parametres**")
-    curve_type_label = st.radio("Type", ["RS", "RP", "Mixte"], key="gen_type")
-    curve_type = {"RS": "RS", "RP": "RP", "Mixte": "mixed"}[curve_type_label]
-    n_curves = st.slider("Nombre de courbes", 1, 100, GEN_DEFAULT_N, key="gen_n")
-    n_days = st.slider("Nombre de jours", 1, 30, 7, key="gen_days")
-    n_viz = st.slider("Courbes a visualiser", 1, 20, min(5, n_curves), key="gen_viz")
+    if lbl_file is not None and st.session_state.get("_gen_lbl_file_name") != lbl_file.name:
+        st.session_state["_gen_lbl_bytes"] = lbl_file.getvalue()
+        st.session_state["_gen_lbl_file_name"] = lbl_file.name
 
     st.markdown(
         '<div class="sidebar-footer">'
@@ -102,200 +81,165 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-# ── generation ────────────────────────────────────────────────────────────────
+
+# ── page ──────────────────────────────────────────────────────────────────────
 
 st.markdown("## Generation")
 
 ts_bytes = st.session_state.get("_gen_ts_bytes")
 lbl_bytes = st.session_state.get("_gen_lbl_bytes")
 ts_key = st.session_state.get("_gen_ts_file_name", "none")
-lbl_key = st.session_state.get("_gen_labels_file_name", "none")
+lbl_key = st.session_state.get("_gen_lbl_file_name", "none")
 
-gen_df = _generate(ts_key, lbl_key, n_curves, curve_type, n_days, GEN_NOISE_STD, ts_bytes, lbl_bytes)
+calibrated = ts_bytes is not None and lbl_bytes is not None
+if calibrated:
+    real_df = _load_real(ts_bytes, ts_key)
+    labels = _load_labels_dict(lbl_bytes, lbl_key)
+    st.caption(f"Calibre sur {real_df['meter_id'].nunique()} compteurs reels — {len(real_df):,} points")
+else:
+    real_df = None
+    labels = None
+    st.caption("Sans calibration : profils de reference theoriques. Charger les deux CSV pour activer la validation.")
 
-if ts_bytes:
-    _ts_info = st.session_state.get("_gen_ts_df")
-    if _ts_info is not None:
-        n_meters = _ts_info["meter_id"].nunique()
-        st.caption(f"{n_meters} compteurs charges · {len(_ts_info):,} points")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Courbes", "Profils", "Comparaison", "Statistiques", "Export"])
+# ── controles ─────────────────────────────────────────────────────────────────
 
-# ── Tab 1 : Courbes ──────────────────────────────────────────────────────────
-with tab1:
-    display_mode = st.radio("Affichage", ["Superposees", "Grille"], horizontal=True, key="gen_display")
+col_ctrl_1, col_ctrl_2 = st.columns([1, 3])
+with col_ctrl_1:
+    curve_type = st.radio("Type", ["RS", "RP"], horizontal=True, key="gen_type")
+with col_ctrl_2:
+    n_curves = st.slider("Courbes generees", 1, 50, GEN_DEFAULT_N, key="gen_n")
 
-    # Un jour particulier
-    day_sel = st.selectbox("Jour", list(range(n_days)), key="gen_day")
-    day_df = gen_df[gen_df["day"] == day_sel]
-    curves_to_show = sorted(day_df["curve_id"].unique())[:n_viz]
+N_DAYS = 7
+gen_df = _generate(ts_key, lbl_key, n_curves, curve_type, N_DAYS, ts_bytes, lbl_bytes)
 
-    if display_mode == "Superposees":
-        fig = go.Figure()
-        for i, cid in enumerate(curves_to_show):
-            cdata = day_df[day_df["curve_id"] == cid]
-            ct = cdata["curve_type"].iloc[0]
-            dash = "solid" if ct == "RS" else "dash"
-            color = PAL.MULTI[i % len(PAL.MULTI)]
-            fig.add_trace(go.Scatter(
-                x=cdata["slot"], y=cdata["kw"],
-                mode="lines", name=f"{ct}-{cid}",
-                line=dict(color=color, width=1.5, dash=dash),
-            ))
-        fig.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title=f"Courbes — jour {day_sel}", xaxis_title="Slot (30 min)", yaxis_title="kW")
-        st.plotly_chart(fig, width="stretch")
-    else:
-        cols = 2
-        rows_needed = (len(curves_to_show) + cols - 1) // cols
-        for row in range(rows_needed):
-            row_cols = st.columns(cols)
-            for col_idx in range(cols):
-                cidx = row * cols + col_idx
-                if cidx >= len(curves_to_show):
-                    break
-                cid = curves_to_show[cidx]
-                cdata = day_df[day_df["curve_id"] == cid]
-                ct = cdata["curve_type"].iloc[0]
-                fig_g = go.Figure(go.Scatter(
-                    x=cdata["slot"], y=cdata["kw"],
-                    mode="lines",
-                    line=dict(color=PAL.REAL, width=1.5),
-                ))
-                fig_g.update_layout(**{
-                    **_plotly_base(),
-                    "title": f"{ct}-{cid}",
-                    "height": 200,
-                    "margin": dict(l=8, r=8, t=28, b=8),
-                })
-                row_cols[col_idx].plotly_chart(fig_g, width="stretch")
 
-# ── Tab 2 : Profils ──────────────────────────────────────────────────────────
-with tab2:
-    rp_ref = _make_rp_profile()
-    rs_ref = _make_rs_profile()
+# ── graphique principal : N courbes sur 7 jours ──────────────────────────────
 
-    fig_prof = go.Figure()
-    fig_prof.add_trace(go.Scatter(
-        x=list(range(48)), y=rs_ref,
-        mode="lines", name="Profil RS",
-        line=dict(color=PAL.RS, width=1.5),
+gen_df_sorted = gen_df.sort_values(["curve_id", "day", "slot"]).copy()
+gen_df_sorted["t"] = gen_df_sorted["day"] * STEPS_PER_DAY + gen_df_sorted["slot"]
+total_slots = N_DAYS * STEPS_PER_DAY
+
+fig_main = go.Figure()
+for cid in sorted(gen_df_sorted["curve_id"].unique()):
+    c = gen_df_sorted[gen_df_sorted["curve_id"] == cid]
+    fig_main.add_trace(go.Scatter(
+        x=c["t"], y=c["kw"],
+        mode="lines", showlegend=False,
+        line=dict(color="#CBD5E1", width=0.8),
+        hoverinfo="skip",
     ))
-    fig_prof.add_trace(go.Scatter(
-        x=list(range(48)), y=rp_ref,
-        mode="lines", name="Profil RP",
-        line=dict(color=PAL.RP, width=1.5, dash="dash"),
-    ))
-    fig_prof.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Profils moyens RS vs RP", xaxis_title="Slot (30 min)", yaxis_title="Puissance normalisee")
-    st.plotly_chart(fig_prof, width="stretch")
 
-    # Ratio WE/semaine par type
-    gen_df_day = gen_df.copy()
-    gen_df_day["is_we"] = gen_df_day["day"] % 7 >= 5
-    ratio_data = gen_df_day.groupby(["curve_type", "is_we"])["kw"].sum().unstack(fill_value=0)
-    ratio_data.columns = [str(c) for c in ratio_data.columns]
+mean_curve = gen_df_sorted.groupby("t")["kw"].mean()
+fig_main.add_trace(go.Scatter(
+    x=mean_curve.index, y=mean_curve.values,
+    mode="lines", name="Moyenne des courbes generees",
+    line=dict(color=PAL.REAL, width=2),
+))
 
-    if "True" in ratio_data.columns and "False" in ratio_data.columns:
-        ratio_we = ratio_data["True"] / (ratio_data["False"] + 1e-8)
-        fig_ratio = go.Figure(go.Bar(
-            x=ratio_we.index.tolist(),
-            y=ratio_we.values.tolist(),
-            marker_color=[PAL.MULTI[0], PAL.MULTI[3]],
-            width=0.4,
+day_ticks = list(range(0, total_slots, STEPS_PER_DAY))
+day_labels = [f"J{d + 1}" for d in range(N_DAYS)]
+fig_main.update_layout(
+    **_plotly_base(),
+    margin=dict(l=16, r=16, t=32, b=16),
+    title=f"{n_curves} courbes {curve_type} sur 7 jours (pas 30 min)",
+    yaxis_title="Puissance (kW)",
+    height=380,
+)
+fig_main.update_xaxes(tickmode="array", tickvals=day_ticks, ticktext=day_labels)
+st.plotly_chart(fig_main, width="stretch")
+
+
+# ── validation : similarite ──────────────────────────────────────────────────
+
+st.markdown("### Similarite avec les donnees reelles")
+
+gen = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
+report = gen.similarity_report(real_df, labels, gen_df, curve_type)
+
+if not report["has_real"]:
+    st.caption("Validation indisponible : charger les CSV timeseries et labels dans la sidebar.")
+else:
+    val_a, val_b = st.columns(2)
+
+    with val_a:
+        hours = [s / 2 for s in range(STEPS_PER_DAY)]
+        fig_a = go.Figure()
+        fig_a.add_trace(go.Scatter(
+            x=hours, y=report["profile_real"],
+            mode="lines", name="Reel",
+            line=dict(color=PAL.REAL, width=1.5),
         ))
-        fig_ratio.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Ratio WE/semaine par type", yaxis_title="Ratio")
-        st.plotly_chart(fig_ratio, width="stretch")
+        fig_a.add_trace(go.Scatter(
+            x=hours, y=report["profile_gen"],
+            mode="lines", name="Genere",
+            line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dash"),
+        ))
+        fig_a.update_layout(
+            **_plotly_base(),
+            margin=dict(l=16, r=16, t=32, b=16),
+            title="Profil moyen sur 24 h",
+            xaxis_title="Heure",
+            yaxis_title="kW",
+            height=280,
+        )
+        st.plotly_chart(fig_a, width="stretch")
+        st.metric("Correlation de forme (Pearson)", f"{report['pearson_profile']:.3f}", delta_color="off")
 
-# ── Tab 3 : Comparaison ──────────────────────────────────────────────────────
-with tab3:
-    curve_ids = sorted(gen_df["curve_id"].unique().tolist())
-    if len(curve_ids) >= 2:
-        c1_id = st.selectbox("Courbe A", curve_ids, index=0, key="comp_a")
-        c2_id = st.selectbox("Courbe B", curve_ids, index=1, key="comp_b")
-        day_c = st.selectbox("Jour", list(range(n_days)), key="comp_day")
+    with val_b:
+        e_real = report["energy_real"]
+        e_gen = report["energy_gen"]
+        lo = float(min(e_real.min(), e_gen.min()))
+        hi = float(max(e_real.max(), e_gen.max()))
+        size = (hi - lo) / 24 if hi > lo else 1.0
+        fig_b = go.Figure()
+        fig_b.add_trace(go.Histogram(
+            x=e_real, xbins=dict(start=lo, end=hi, size=size),
+            name="Reel", marker_color=PAL.REAL, opacity=0.55, histnorm="probability",
+        ))
+        fig_b.add_trace(go.Histogram(
+            x=e_gen, xbins=dict(start=lo, end=hi, size=size),
+            name="Genere", marker_color=PAL.TEXT_MUTED, opacity=0.55, histnorm="probability",
+        ))
+        fig_b.update_layout(
+            **_plotly_base(),
+            margin=dict(l=16, r=16, t=32, b=16),
+            title="Distribution energie journaliere",
+            xaxis_title="kWh / jour",
+            yaxis_title="Frequence",
+            barmode="overlay",
+            height=280,
+        )
+        st.plotly_chart(fig_b, width="stretch")
+        st.metric("Distance de Wasserstein", f"{report['wasserstein_energy']:.2f} kWh", delta_color="off")
 
-        c1_data = gen_df[(gen_df["curve_id"] == c1_id) & (gen_df["day"] == day_c)]
-        c2_data = gen_df[(gen_df["curve_id"] == c2_id) & (gen_df["day"] == day_c)]
 
-        col_a, col_b = st.columns(2)
-        for col, cdata, label in [(col_a, c1_data, f"Courbe {c1_id}"), (col_b, c2_data, f"Courbe {c2_id}")]:
-            fig_c = go.Figure(go.Scatter(
-                x=cdata["slot"], y=cdata["kw"],
-                mode="lines",
-                line=dict(color=PAL.REAL, width=1.5),
-            ))
-            fig_c.update_layout(
-                **_plotly_base(),
-                margin=dict(l=16, r=16, t=32, b=16),
-                title=label,
-                xaxis_title="Slot", yaxis_title="kW", height=250,
-            )
-            col.plotly_chart(fig_c, width="stretch")
+# ── KPIs coherence globale ────────────────────────────────────────────────────
 
-        # Tableau stats
-        stats = []
-        for cdata, label in [(c1_data, f"Courbe {c1_id}"), (c2_data, f"Courbe {c2_id}")]:
-            energy = cdata["kw"].sum() * 0.5
-            peak = cdata["kw"].max()
-            mean_kw = cdata["kw"].mean()
-            ct = cdata["curve_type"].iloc[0] if not cdata.empty else "?"
-            stats.append({"Courbe": label, "Type": ct, "Energie (kWh)": round(energy, 2),
-                          "Pic (kW)": round(peak, 3), "Moy (kW)": round(mean_kw, 3)})
-        st.dataframe(pd.DataFrame(stats), width="stretch")
-    else:
-        st.caption("Au moins 2 courbes requises.")
+st.markdown("### Coherence globale")
 
-# ── Tab 4 : Statistiques ──────────────────────────────────────────────────────
-with tab4:
-    gen_inst = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
-    dtw_scores = gen_inst.quality_scores(gen_df)
-    if dtw_scores:
-        st.markdown("**Ecart moyen vs profil reel**")
-        cols_dtw = st.columns(len(dtw_scores))
-        for col, (ct, score) in zip(cols_dtw, dtw_scores.items()):
-            col.metric(f"DTW {ct}", f"{score:.2f} kW", delta_color="off")
-    # Distribution energie journaliere
-    daily_energy = gen_df.groupby(["curve_id", "day"])["kw"].sum() * 0.5
-    fig_dist = go.Figure(go.Histogram(
-        x=daily_energy.values,
-        nbinsx=20,
-        marker_color=PAL.MULTI[0],
-        opacity=0.85,
-    ))
-    fig_dist.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Distribution energie journaliere (kWh)", xaxis_title="kWh/j", yaxis_title="Frequence")
-    st.plotly_chart(fig_dist, width="stretch")
+k1, k2, k3 = st.columns(3)
+with k1:
+    delta_e = f"reel : {report['mean_energy_real']:.2f}" if report["mean_energy_real"] is not None else None
+    st.metric("Energie moyenne / jour", f"{report['mean_energy_gen']:.2f} kWh",
+              delta=delta_e, delta_color="off")
+with k2:
+    delta_p = f"reel : {report['peak_real']:.2f}" if report["peak_real"] is not None else None
+    st.metric("Pic", f"{report['peak_gen']:.2f} kW",
+              delta=delta_p, delta_color="off")
+with k3:
+    delta_r = f"reel : {report['we_ratio_real']:.2f}" if report["we_ratio_real"] is not None else None
+    st.metric("Ratio WE / semaine", f"{report['we_ratio_gen']:.2f}",
+              delta=delta_r, delta_color="off")
 
-    # Heatmap puissance : slot x curve_id (premier jour)
-    pivot_ids = sorted(gen_df["curve_id"].unique())[:n_viz]
-    heat_df = gen_df[(gen_df["day"] == 0) & (gen_df["curve_id"].isin(pivot_ids))]
-    pivot = heat_df.pivot_table(index="slot", columns="curve_id", values="kw", aggfunc="mean")
 
-    fig_heat = go.Figure(go.Heatmap(
-        z=pivot.values,
-        x=[str(c) for c in pivot.columns],
-        y=pivot.index.tolist(),
-        colorscale=[[0, "#FFFFFF"], [0.5, "#94A3B8"], [1, "#0F172A"]],
-    ))
-    fig_heat.update_layout(
-        **_plotly_base(),
-        margin=dict(l=16, r=16, t=32, b=16),
-        title="Puissance par slot et courbe (jour 0)",
-        xaxis_title="Courbe",
-        yaxis_title="Slot (30 min)",
-    )
-    st.plotly_chart(fig_heat, width="stretch")
+# ── export ────────────────────────────────────────────────────────────────────
 
-# ── Tab 5 : Export ────────────────────────────────────────────────────────────
-with tab5:
-    st.dataframe(gen_df.head(200), width="stretch")
-
-    csv_bytes = gen_df.to_csv(index=False).encode("utf-8")
-    st.download_button("Telecharger CSV", csv_bytes, file_name="courbes_synthetiques.csv", mime="text/csv")
-
-    # JSON resume stats
-    gen_inst_export = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
-    stats_dict = gen_inst_export.profile_stats()
-    stats_dict["n_curves"] = int(n_curves)
-    stats_dict["n_days"] = int(n_days)
-    stats_dict["curve_type"] = curve_type
-    json_bytes = json.dumps(stats_dict, indent=2).encode("utf-8")
-    st.download_button("Telecharger JSON stats", json_bytes, file_name="stats.json", mime="application/json")
+st.markdown("### Export")
+csv_bytes = gen_df.to_csv(index=False).encode("utf-8")
+st.download_button(
+    "Telecharger le CSV",
+    csv_bytes,
+    file_name=f"courbes_{curve_type}_{n_curves}.csv",
+    mime="text/csv",
+)
