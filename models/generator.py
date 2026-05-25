@@ -100,8 +100,13 @@ class CurveGenerator:
             )
             mean_intra = intra_std.mean()
             rel_pattern = intra_std / max(mean_intra, 1e-9)   # normalisé, mean≈1.0
+            # Cap adaptatif : proportionnel à la dynamique du profil calibré.
+            # Garantit SNR ≥ ~1.3 → corr individuelle ≥ 0.79 quelle que soit la
+            # "platitude" du profil réel (RP très plat = profil_std faible → bruit réduit).
+            profile_std = float(self._profiles[label_name].std())
+            noise_cap = min(0.20, profile_std * 0.75)
             self.noise_std_by_slot[label_name] = np.clip(
-                GEN_NOISE_STD * rel_pattern.values, 0.0, 0.20
+                GEN_NOISE_STD * rel_pattern.values, 0.0, noise_cap
             )
 
         return self

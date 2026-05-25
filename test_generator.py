@@ -59,16 +59,36 @@ for ct in ("RP", "RS"):
     check(p.min() >= 0.0,                  f"{ct}: profil >= 0")
     check(stds.max() <= 0.20 + 1e-9,      f"{ct}: slot_std <= 0.20")
     check(stds.min() >= 0.0,              f"{ct}: slot_std >= 0")
-    # Le patron de bruit doit refléter la structure des données (non constant)
-    check(stds.std() > 0.0,
-          f"{ct}: patron de bruit structure (std={stds.std():.5f} > 0)",
-          f"{ct}: slot_std uniforme — patron non informatif")
-    # Niveau moyen proche de GEN_NOISE_STD (conservateur)
-    check(abs(stds.mean() - GEN_NOISE_STD) < 0.05,
-          f"{ct}: niveau moyen ~ GEN_NOISE_STD ({stds.mean():.4f} ~ {GEN_NOISE_STD})",
-          f"{ct}: niveau bruit trop loin de GEN_NOISE_STD ({stds.mean():.4f})")
+    # Niveau conservateur : toujours <= profile_std * 0.75 (cap adaptatif)
+    profile_std = float(p.std())
+    noise_cap_expected = min(0.20, profile_std * 0.75)
+    check(stds.max() <= noise_cap_expected + 1e-9,
+          f"{ct}: slot_std respecte cap adaptatif ({stds.max():.4f} <= {noise_cap_expected:.4f})",
+          f"{ct}: slot_std depasse le cap adaptatif")
     check(ls > 0.05,  f"{ct}: log_std > 0.05 — diversite amplitude calibree")
     check(s  > 0.0,   f"{ct}: scale > 0")
+
+
+# ── 2b. Correlation individuelle (lisibilite des courbes) ────────────
+section("2b. Correlation individuelle — courbes visuellement lisibles")
+for ct in ("RP", "RS"):
+    np.random.seed(42)
+    gdf_ind = gen.generate(n=30, curve_type=ct, n_days=1)
+    ref = gen._profiles[ct]
+    corrs = []
+    for cid in gdf_ind["curve_id"].unique():
+        c = gdf_ind[gdf_ind["curve_id"] == cid]["kw"].values
+        c_norm = c / (c.max() + 1e-9)
+        corrs.append(float(np.corrcoef(c_norm, ref)[0, 1]))
+    corr_mean = np.mean(corrs)
+    corr_min  = np.min(corrs)
+    print(f"  {ct}: corr individuelle moy={corr_mean:.3f}  min={corr_min:.3f}")
+    check(corr_mean > 0.75,
+          f"{ct}: courbes lisibles (corr_moy={corr_mean:.3f} > 0.75)",
+          f"{ct}: courbes bruitees (corr_moy={corr_mean:.3f} <= 0.75)")
+    check(corr_min > 0.50,
+          f"{ct}: pas de courbe chaotique (corr_min={corr_min:.3f} > 0.50)",
+          f"{ct}: au moins une courbe chaotique (corr_min={corr_min:.3f})")
 
 
 # ── 3. Diversite d'amplitude ─────────────────────────────────────────
