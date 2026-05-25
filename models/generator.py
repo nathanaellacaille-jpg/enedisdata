@@ -3,16 +3,12 @@ import pandas as pd
 from config import STEPS_PER_DAY, GEN_NOISE_STD, GEN_NOISE_RHO, _make_rp_profile, _make_rs_profile
 
 
-def _dtw_distance(a: np.ndarray, b: np.ndarray) -> float:
-    """Distance DTW entre deux series de meme longueur (numpy pur, O(n²))."""
-    n = len(a)
-    D = np.full((n + 1, n + 1), np.inf)
-    D[0, 0] = 0.0
-    for i in range(1, n + 1):
-        for j in range(1, n + 1):
-            cost = abs(a[i - 1] - b[j - 1])
-            D[i, j] = cost + min(D[i - 1, j], D[i, j - 1], D[i - 1, j - 1])
-    return float(D[n, n])
+def _wasserstein_1d(x: np.ndarray, y: np.ndarray, n_q: int = 200) -> float:
+    """Distance Wasserstein-1 entre deux echantillons 1D via quantiles."""
+    if len(x) == 0 or len(y) == 0:
+        return 0.0
+    q = np.linspace(0.0, 1.0, n_q)
+    return float(np.mean(np.abs(np.quantile(x, q) - np.quantile(y, q))))
 
 
 class CurveGenerator:
@@ -163,17 +159,102 @@ class CurveGenerator:
                     })
         return pd.DataFrame(records)
 
-    def quality_scores(self, gen_df: pd.DataFrame) -> dict:
-        """DTW moyen entre chaque courbe generee et le profil reel calibre."""
-        scores = {}
-        for ct in gen_df["curve_type"].unique():
-            real = self._profiles[ct] * self._scales[ct]
-            dtw_vals = [
-                _dtw_distance(real, grp.sort_values("slot")["kw"].values)
-                for (_, _), grp in gen_df[gen_df["curve_type"] == ct].groupby(["curve_id", "day"])
-            ]
-            scores[ct] = round(float(np.mean(dtw_vals)), 3) if dtw_vals else 0.0
-        return scores
+    def similarity_report(
+        self,
+        real_df: pd.DataFrame | None,
+        labels: dict | None,
+        gen_df: pd.DataFrame,
+        curve_type: str,
+    ) -> dict:
+        """Compare courbes generees vs donnees reelles pour un type donne.
+
+        Retourne profils journaliers, distributions d'energie et metriques de
+        similarite (Pearson sur la forme, Wasserstein sur l'energie). Si pas
+        de donnees reelles fournies, has_real=False et les comparaisons sont None.
+        """
+        report = {
+            "has_real": False,
+            "pearson_profile": None,
+            "wasserstein_energy": None,
+            "mean_energy_real": None,
+            "mean_energy_gen": None,
+            "peak_real": None,
+            "peak_gen": None,
+            "we_ratio_real": None,
+            "we_ratio_gen": None,
+            "profile_real": None,
+            "profile_gen": None,
+            "energy_real": None,
+            "energy_gen": None,
+        }
+
+        gen_sub = gen_df[gen_df["curve_type"] == curve_type]
+        if gen_sub.empty:
+            return report
+
+        profile_gen = (
+            gen_sub.groupby("slot")["kw"].mean()
+            .reindex(range(STEPS_PER_DAY), fill_value=0.0)
+            .values
+        )
+        daily_gen = gen_sub.groupby(["curve_id", "day"])["kw"].sum().reset_index()
+        daily_gen["energy"] = daily_gen["kw"] * 0.5
+        daily_gen["is_we"] = daily_gen["day"] % 7 >= 5
+        energy_gen = daily_gen["energy"].values
+        we_avg_gen = daily_gen.loc[daily_gen["is_we"], "energy"].mean() if daily_gen["is_we"].any() else 0.0
+        wd_avg_gen = daily_gen.loc[~daily_gen["is_we"], "energy"].mean() if (~daily_gen["is_we"]).any() else 0.0
+
+        peaks_gen = gen_sub.groupby(["curve_id", "day"])["kw"].max()
+        report["profile_gen"] = profile_gen
+        report["energy_gen"] = energy_gen
+        report["mean_energy_gen"] = float(energy_gen.mean()) if len(energy_gen) else 0.0
+        report["peak_gen"] = float(peaks_gen.median()) if len(peaks_gen) else 0.0
+        report["we_ratio_gen"] = float(we_avg_gen / max(wd_avg_gen, 1e-9)) if wd_avg_gen else 0.0
+
+        if real_df is None or labels is None:
+            return report
+
+        label_val = 1 if curve_type == "RS" else 0
+        real_ids = [k for k, v in labels.items() if v == label_val]
+        sub = real_df[real_df["meter_id"].isin(real_ids)]
+        if sub.empty:
+            return report
+
+        sub = sub.copy()
+        sub["slot"] = sub["ts"].dt.hour * 2 + sub["ts"].dt.minute // 30
+        sub["date"] = sub["ts"].dt.date
+        sub["dow"] = sub["ts"].dt.dayofweek
+
+        profile_real = (
+            sub.groupby("slot")["kw"].mean()
+            .reindex(range(STEPS_PER_DAY), fill_value=0.0)
+            .values
+        )
+        daily = sub.groupby(["meter_id", "date"]).agg(
+            kw_sum=("kw", "sum"), dow=("dow", "first")
+        )
+        daily["energy"] = daily["kw_sum"] * 0.5
+        daily["is_we"] = daily["dow"] >= 5
+        energy_real = daily["energy"].values
+        we_avg_real = daily.loc[daily["is_we"], "energy"].mean() if daily["is_we"].any() else 0.0
+        wd_avg_real = daily.loc[~daily["is_we"], "energy"].mean() if (~daily["is_we"]).any() else 0.0
+
+        pearson = 0.0
+        if profile_real.std() > 0 and profile_gen.std() > 0:
+            pearson = float(np.corrcoef(profile_real, profile_gen)[0, 1])
+
+        report["has_real"] = True
+        report["pearson_profile"] = pearson
+        report["wasserstein_energy"] = _wasserstein_1d(energy_real, energy_gen)
+        report["profile_real"] = profile_real
+        report["energy_real"] = energy_real
+        peaks_real = sub.groupby(["meter_id", "date"])["kw"].max()
+        report["mean_energy_real"] = float(np.mean(energy_real)) if len(energy_real) else 0.0
+        report["peak_real"] = float(peaks_real.median()) if len(peaks_real) else 0.0
+        report["we_ratio_real"] = (
+            float(we_avg_real / max(wd_avg_real, 1e-9)) if wd_avg_real else 0.0
+        )
+        return report
 
     def profile_stats(self) -> dict:
         """Energie moyenne et std par type."""
