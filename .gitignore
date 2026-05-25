@@ -4,3 +4,22 @@ __pycache__/
 .claude/
 *.egg-info/
 .env
+
+# Données — ne pas versionner
+*.csv
+*.xlsx
+export*
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Docs de travail internes (analyses, notes)
+AUDIT_*.md
+CLASSIFICATION_NEXT.md
+CONTEXT_*.md
+EASY_FIXES.md
+GIT_CLEANUP.md
+docs/METHODOLOGIE.md
+docs/NOTEBOOK_SPEC.md
+docs/PRESENTATION.md
