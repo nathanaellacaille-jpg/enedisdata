@@ -3,8 +3,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, MAX_METERS_UPLOAD
-from models.forecaster import RidgeForecaster
+from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, FCST_ARIMA_ORDER, MAX_METERS_UPLOAD
+from models.forecaster import RidgeForecaster, ARIMAForecaster, LSTMForecaster
 from utils.metrics import compute_metrics
 from utils.parser import parse_timeseries
 
@@ -40,6 +40,24 @@ def _train_ridge(series_key: str, series: list) -> RidgeForecaster:
     """Entraine le forecaster Ridge."""
     arr = np.array(series, dtype=float)
     mdl = RidgeForecaster()
+    mdl.fit(arr)
+    return mdl
+
+
+@st.cache_resource
+def _train_arima(series_key: str, series: list) -> ARIMAForecaster:
+    """Entraine le forecaster ARIMA."""
+    arr = np.array(series, dtype=float)
+    mdl = ARIMAForecaster()
+    mdl.fit(arr, order=FCST_ARIMA_ORDER)
+    return mdl
+
+
+@st.cache_resource
+def _train_lstm(series_key: str, series: list) -> LSTMForecaster:
+    """Entraine le forecaster LSTM."""
+    arr = np.array(series, dtype=float)
+    mdl = LSTMForecaster()
     mdl.fit(arr)
     return mdl
 
@@ -107,19 +125,37 @@ test_series = series[-horizon:]
 train_ts = ts_index[:-horizon]
 test_ts = ts_index[-horizon:]
 
+# ── Chargement sequentiel des modeles (un par un pour eviter les pics RAM) ────
+
+# 1. Ridge — rapide, pas de spinner
 ridge = _train_ridge(series_key, train_series.tolist())
 ridge_pred = ridge.predict(horizon)
 naive_pred = _naive_forecast(train_series, horizon)
+
+# 2. ARIMA — moyenne complexite, chargement apres Ridge libere
+arima_pred = None
+with st.spinner("Chargement ARIMA..."):
+    try:
+        arima = _train_arima(series_key, train_series.tolist())
+        arima_pred = arima.predict(horizon)
+    except Exception as e:
+        st.warning(f"ARIMA indisponible : {e}")
+
+# 3. LSTM — le plus lourd, chargement en dernier
+lstm_pred = None
+with st.spinner("Chargement LSTM..."):
+    try:
+        lstm_model = _train_lstm(series_key, train_series.tolist())
+        lstm_pred = lstm_model.predict(horizon)
+    except Exception as e:
+        st.warning(f"LSTM indisponible : {e}")
 
 last_train_ts = pd.Timestamp(train_ts[-1])
 future_ts = test_ts
 y_eval = test_series
 
-# Metriques
-m_ridge = compute_metrics(y_eval, ridge_pred)
-m_naive = compute_metrics(y_eval, naive_pred)
+# ── Tabs ──────────────────────────────────────────────────────────────────────
 
-# Tabs
 tab1, tab2, tab3, tab4 = st.tabs(["Prevision", "Resultats", "Precision par heure", "Comment ca marche"])
 
 # ── Tab 1 : Prevision ─────────────────────────────────────────────────────────
@@ -134,7 +170,6 @@ with tab1:
         mode="lines", name="Historique",
         line=dict(color=PAL.REAL, width=2),
     ))
-    # Ligne de separation donnees connues / prevision
     fig.add_vline(x=str(last_train_ts), line_width=1, line_dash="solid", line_color=PAL.BORDER)
     fig.add_annotation(
         x=str(last_train_ts), y=1, yref="paper",
@@ -142,24 +177,37 @@ with tab1:
         font=dict(size=10, color=PAL.TEXT_MUTED),
         xanchor="right", xshift=-6,
     )
+    # Predictions : du plus fonce (meilleur esperé) au plus clair (reference)
     fig.add_trace(go.Scatter(
         x=future_ts, y=ridge_pred,
-        mode="lines", name="Prevision",
+        mode="lines", name="Ridge",
         line=dict(color=PAL.LR, width=1.5, dash="longdash"),
     ))
+    if arima_pred is not None:
+        fig.add_trace(go.Scatter(
+            x=future_ts, y=arima_pred,
+            mode="lines", name="ARIMA",
+            line=dict(color=PAL.ARIMA, width=1.5, dash="dash"),
+        ))
+    if lstm_pred is not None:
+        fig.add_trace(go.Scatter(
+            x=future_ts, y=lstm_pred,
+            mode="lines", name="LSTM",
+            line=dict(color=PAL.LSTM, width=1.5, dash="dashdot"),
+        ))
     fig.add_trace(go.Scatter(
         x=future_ts, y=naive_pred,
-        mode="lines", name="Reference (jour precedent)",
+        mode="lines", name="Reference",
         line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot"),
     ))
 
-    # Annotation pic d'ecart
+    # Annotation pic d'ecart Ridge
     diff = np.abs(y_eval - ridge_pred)
     peak_idx = int(np.argmax(diff))
     peak_ts = future_ts[peak_idx] if peak_idx < len(future_ts) else future_ts[-1]
     fig.add_annotation(
         x=str(peak_ts), y=float(ridge_pred[peak_idx]),
-        text="Ecart max",
+        text="Ecart max Ridge",
         showarrow=True, arrowhead=2, arrowcolor=PAL.TEXT_MUTED,
         font=dict(size=10, color=PAL.TEXT_MUTED),
     )
@@ -174,19 +222,39 @@ with tab1:
 
 # ── Tab 2 : Resultats ─────────────────────────────────────────────────────────
 with tab2:
-    mae_ridge = m_ridge["MAE"]
-    mae_naive = m_naive["MAE"]
-    gain = (mae_naive - mae_ridge) / mae_naive * 100 if mae_naive > 0 else 0.0
+    rows = [("Ridge", ridge_pred), ("Reference", naive_pred)]
+    if arima_pred is not None:
+        rows.append(("ARIMA", arima_pred))
+    if lstm_pred is not None:
+        rows.append(("LSTM", lstm_pred))
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Erreur prevision (kW)", f"{mae_ridge:.2f}", delta_color="off")
-    c2.metric("Erreur reference (kW)", f"{mae_naive:.2f}", delta_color="off")
-    c3.metric("Gain vs reference", f"{gain:.0f}%", delta_color="off")
+    mae_vals = {name: compute_metrics(y_eval, pred)["MAE"] for name, pred in rows}
+    best = min(mae_vals, key=mae_vals.get)
+    mae_ref = mae_vals["Reference"]
 
-    st.caption(
-        "L'erreur est la difference moyenne entre la consommation prevue et la consommation reelle, "
-        "exprimee en kilowatts. La reference repete simplement le jour precedent."
+    c1, c2 = st.columns(2)
+    c1.metric("Meilleur modele", best, delta_color="off")
+    c2.metric("Erreur reference (kW)", f"{mae_ref:.2f}", delta_color="off")
+
+    # Classement MAE sous forme de barres
+    sorted_names = sorted(mae_vals, key=mae_vals.get)
+    sorted_mae = [mae_vals[n] for n in sorted_names]
+    bar_colors = [PAL.MULTI[0] if n == best else PAL.MULTI[4] for n in sorted_names]
+
+    fig_bar = go.Figure(go.Bar(
+        x=sorted_mae,
+        y=sorted_names,
+        orientation="h",
+        marker_color=bar_colors,
+        width=0.4,
+    ))
+    fig_bar.update_layout(
+        **_plotly_base(),
+        margin=dict(l=16, r=16, t=32, b=16),
+        title="Erreur moyenne par modele (MAE en kW) — moins = mieux",
+        xaxis_title="kW",
     )
+    st.plotly_chart(fig_bar, width="stretch")
 
 # ── Tab 3 : Precision par heure ───────────────────────────────────────────────
 with tab3:
@@ -195,9 +263,21 @@ with tab3:
     fig_h = go.Figure()
     fig_h.add_trace(go.Scatter(
         x=hours, y=np.abs(y_eval - ridge_pred),
-        mode="lines", name="Prevision",
+        mode="lines", name="Ridge",
         line=dict(color=PAL.LR, width=1.5),
     ))
+    if arima_pred is not None:
+        fig_h.add_trace(go.Scatter(
+            x=hours, y=np.abs(y_eval - arima_pred),
+            mode="lines", name="ARIMA",
+            line=dict(color=PAL.ARIMA, width=1.5, dash="dash"),
+        ))
+    if lstm_pred is not None:
+        fig_h.add_trace(go.Scatter(
+            x=hours, y=np.abs(y_eval - lstm_pred),
+            mode="lines", name="LSTM",
+            line=dict(color=PAL.LSTM, width=1.5, dash="dashdot"),
+        ))
     fig_h.add_trace(go.Scatter(
         x=hours, y=np.abs(y_eval - naive_pred),
         mode="lines", name="Reference",
@@ -214,13 +294,23 @@ with tab3:
 
 # ── Tab 4 : Comment ca marche ─────────────────────────────────────────────────
 with tab4:
-    st.markdown("**Prevision intelligente**")
+    st.markdown("**Ridge**")
     st.caption(
-        "Le modele analyse les 8 derniers jours de consommation pour predire les 24 prochaines heures. "
-        "Il apprend automatiquement les habitudes journalieres et hebdomadaires du compteur."
+        "Analyse les 8 derniers jours de consommation pour predire les 24 prochaines heures. "
+        "Rapide et fiable, il apprend les habitudes journalieres et hebdomadaires du compteur."
     )
-    st.markdown("**Reference simple**")
+    st.markdown("**ARIMA**")
     st.caption(
-        "Pour comparaison, la reference repete simplement la consommation du jour precedent. "
-        "Un bon modele doit systematiquement faire mieux que cette reference."
+        "Detecte les tendances et les repetitions a court terme dans la courbe de consommation. "
+        "Performant quand la serie suit des patterns reguliers."
+    )
+    st.markdown("**LSTM**")
+    st.caption(
+        "Reseau de neurones capable de memoriser des comportements complexes sur plusieurs jours. "
+        "Le plus puissant sur des donnees abondantes."
+    )
+    st.markdown("**Reference**")
+    st.caption(
+        "Repete simplement la consommation du jour precedent. "
+        "Sert de base de comparaison : un bon modele doit faire mieux."
     )
