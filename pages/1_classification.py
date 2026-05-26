@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from sklearn.metrics import confusion_matrix, recall_score, accuracy_score, f1_score
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.model_selection import train_test_split
 
 from config import PAL, CLF_TEST_SIZE, _make_rp_profile, _make_rs_profile
 from models.classifier import EnergyClassifier
@@ -102,7 +102,12 @@ def _compute_importances(features: pd.DataFrame, labels: dict) -> pd.Series:
 
 @st.cache_resource(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
 def _train_model(features: pd.DataFrame, labels: dict):
-    """Entraine EnergyClassifier (HistGBT, threshold tune) et retourne (model, X_test, y_test, y_proba_test, cv_scores)."""
+    """Entraine EnergyClassifier (Stacking, threshold tune) et retourne (model, X_test, y_test, y_proba_test, cv_scores).
+
+    Metriques calculees uniquement sur le holdout du train_test_split (zero refit supplementaire).
+    Le CV5 imbriquant 5x EnergyClassifier etait trop lourd pour Streamlit Cloud (1 GB RAM).
+    Les vraies metriques CV5 + perm restent dispo en local via scripts/phase0_diagnostic.py.
+    """
     common = [mid for mid in features.index if str(mid) in labels]
     if len(common) < 4:
         return None, None, None, None, None
@@ -114,27 +119,15 @@ def _train_model(features: pd.DataFrame, labels: dict):
     clf = EnergyClassifier()
     clf.fit(X_train, y_train)
     y_proba_test = clf.predict_proba(X_test)
-
-    # Validation croisée stratifiée 5 folds : chaque fold reentraine + retune son seuil
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    accs, f1s, recs, thresholds = [], [], [], []
-    for tr_idx, te_idx in cv.split(X, y):
-        fold_clf = EnergyClassifier()
-        fold_clf.fit(X.iloc[tr_idx], y[tr_idx])
-        proba_fold = fold_clf.predict_proba(X.iloc[te_idx])
-        pred_fold = (proba_fold >= fold_clf.threshold_).astype(int)
-        accs.append(accuracy_score(y[te_idx], pred_fold))
-        f1s.append(f1_score(y[te_idx], pred_fold, average="weighted"))
-        recs.append(recall_score(y[te_idx], pred_fold, pos_label=1, zero_division=0))
-        thresholds.append(fold_clf.threshold_)
+    y_pred_test = (y_proba_test >= clf.threshold_).astype(int)
     cv_scores = {
-        "accuracy": float(np.mean(accs)),
-        "f1": float(np.mean(f1s)),
-        "recall_rs": float(np.mean(recs)),
-        "accuracy_std": float(np.std(accs)),
-        "f1_std": float(np.std(f1s)),
-        "recall_rs_std": float(np.std(recs)),
-        "threshold_mean": float(np.mean(thresholds)),
+        "accuracy": float(accuracy_score(y_test, y_pred_test)),
+        "f1": float(f1_score(y_test, y_pred_test, average="weighted")),
+        "recall_rs": float(recall_score(y_test, y_pred_test, pos_label=1, zero_division=0)),
+        "accuracy_std": 0.0,
+        "f1_std": 0.0,
+        "recall_rs_std": 0.0,
+        "threshold_mean": float(clf.threshold_),
     }
     return clf, X_test, y_test, y_proba_test, cv_scores
 

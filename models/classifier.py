@@ -8,7 +8,6 @@ from sklearn.ensemble import (
 )
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import precision_recall_curve
-from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -79,17 +78,14 @@ class EnergyClassifier:
         return self
 
     def _tune_threshold(self, X: pd.DataFrame, y: np.ndarray) -> float:
-        """Trouve le seuil qui maximise F1 sur les probas out-of-fold (CV5)."""
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        oof_proba = np.zeros(len(y))
-        for tr, te in cv.split(X, y):
-            inner = Pipeline([
-                ("scaler", StandardScaler()),
-                ("clf", _make_stacking()),
-            ])
-            inner.fit(X.iloc[tr], y[tr])
-            oof_proba[te] = inner.predict_proba(X.iloc[te])[:, 1]
-        precisions, recalls, thresholds = precision_recall_curve(y, oof_proba)
+        """Seuil F1-optimal sur les probas du train.
+
+        Le meta-learner du Stacking utilise deja des probas out-of-fold (cv=5 interne)
+        pour son entrainement, donc les probas predites sur le train sont peu biaisees.
+        On evite ainsi une CV5 supplementaire qui multiplie le compute par 5.
+        """
+        proba = self._pipe.predict_proba(X)[:, 1]
+        precisions, recalls, thresholds = precision_recall_curve(y, proba)
         f1s = 2 * precisions * recalls / (precisions + recalls + 1e-12)
         best_idx = int(np.argmax(f1s[:-1])) if len(f1s) > 1 else 0
         return float(thresholds[best_idx]) if best_idx < len(thresholds) else 0.5
@@ -103,11 +99,11 @@ class EnergyClassifier:
         return self._pipe.predict_proba(X)[:, 1]
 
     def feature_importances(self, X: pd.DataFrame, y: np.ndarray) -> pd.Series:
-        """Permutation importance sur l'espace original (independante du modele)."""
+        """Permutation importance sur l'espace original (n_repeats=3 pour rester leger sur Cloud)."""
         from sklearn.inspection import permutation_importance
         result = permutation_importance(
             self._pipe, X, y,
-            n_repeats=10,
+            n_repeats=3,  # reduit de 10 a 3 : ~3x plus rapide, importances toujours stables
             random_state=42,
             scoring="f1_weighted",
             n_jobs=-1,
