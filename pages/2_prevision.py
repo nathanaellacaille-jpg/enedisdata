@@ -3,8 +3,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, FCST_ARIMA_ORDER, MAX_METERS_UPLOAD
-from models.forecaster import RidgeForecaster, ARIMAForecaster, LSTMForecaster
+from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, MAX_METERS_UPLOAD
+from models.forecaster import RidgeForecaster
 from utils.metrics import compute_metrics
 from utils.parser import parse_timeseries
 
@@ -44,24 +44,6 @@ def _train_ridge(series_key: str, series: list) -> RidgeForecaster:
     return mdl
 
 
-@st.cache_resource
-def _train_arima(series_key: str, series: list) -> ARIMAForecaster:
-    """Entraine le forecaster ARIMA."""
-    arr = np.array(series, dtype=float)
-    mdl = ARIMAForecaster()
-    mdl.fit(arr, order=FCST_ARIMA_ORDER)
-    return mdl
-
-
-@st.cache_resource
-def _train_lstm(series_key: str, series: list) -> LSTMForecaster:
-    """Entraine le forecaster LSTM."""
-    arr = np.array(series, dtype=float)
-    mdl = LSTMForecaster()
-    mdl.fit(arr)
-    return mdl
-
-
 def _naive_forecast(series: np.ndarray, h: int) -> np.ndarray:
     """Prevision naive : repete le dernier jour connu de la serie d'entrainement."""
     day = series[-STEPS_PER_DAY:]
@@ -85,18 +67,12 @@ with st.sidebar:
 
     df = st.session_state.get("_ts_df")
     selected = None
-    use_arima = False
-    use_lstm = False
 
     if df is not None:
         n_meters = df["meter_id"].nunique()
         st.caption(f"{n_meters} compteurs charges · {len(df):,} points")
         meter_ids = sorted(df["meter_id"].unique().tolist())
         selected = st.selectbox("Compteur", meter_ids, key="fcst_meter")
-
-    st.markdown("**Modeles**")
-    use_arima = st.checkbox("Activer ARIMA", value=False, key="use_arima")
-    use_lstm = st.checkbox("Activer LSTM", value=False, key="use_lstm")
 
     st.markdown(
         '<div class="sidebar-footer">'
@@ -123,54 +99,30 @@ if len(series) < FCST_N_LAGS + FCST_HORIZON_H * 2 + STEPS_PER_DAY:
     st.warning(f"Serie trop courte pour la prevision (minimum {min_days} jours).")
     st.stop()
 
-# Horizon en pas (24h = 48 pas)
 horizon = FCST_HORIZON_H * 2
 series_key = f"{selected}_{len(series)}"
 
-# Split train/test : dernier horizon = test set, jamais vu a l'entrainement
 train_series = series[:-horizon]
 test_series = series[-horizon:]
 train_ts = ts_index[:-horizon]
 test_ts = ts_index[-horizon:]
 
-# Entrainement sur train_series uniquement
 ridge = _train_ridge(series_key, train_series.tolist())
 ridge_pred = ridge.predict(horizon)
-
 naive_pred = _naive_forecast(train_series, horizon)
 
-arima = None
-arima_pred = None
-if use_arima:
-    with st.spinner("Ajustement ARIMA..."):
-        try:
-            arima = _train_arima(series_key, train_series.tolist())
-            arima_pred = arima.predict(horizon)
-        except Exception as e:
-            st.warning(f"ARIMA : {e}")
-
-lstm_model = None
-lstm_pred = None
-if use_lstm:
-    with st.spinner("Entrainement LSTM..."):
-        try:
-            lstm_model = _train_lstm(series_key, train_series.tolist())
-            lstm_pred = lstm_model.predict(horizon)
-        except Exception as e:
-            st.warning(f"LSTM : {e}")
-
-# Les predictions s'alignent sur la periode de test (timestamps reels)
 last_train_ts = pd.Timestamp(train_ts[-1])
 future_ts = test_ts
-
-# Evaluation honnete : test_series n'a pas ete vu a l'entrainement
 y_eval = test_series
-eval_ts = test_ts
+
+# Metriques
+m_ridge = compute_metrics(y_eval, ridge_pred)
+m_naive = compute_metrics(y_eval, naive_pred)
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Graphique", "Analyse", "Technique", "Horizon", "Guide"])
+tab1, tab2, tab3, tab4 = st.tabs(["Prevision", "Resultats", "Precision par heure", "Comment ca marche"])
 
-# ── Tab 1 : Graphique ─────────────────────────────────────────────────────────
+# ── Tab 1 : Prevision ─────────────────────────────────────────────────────────
 with tab1:
     n_hist = min(len(series), STEPS_PER_DAY * 7)
     hist_ts = ts_index[-n_hist:]
@@ -180,45 +132,37 @@ with tab1:
     fig.add_trace(go.Scatter(
         x=hist_ts, y=hist_kw,
         mode="lines", name="Historique",
-        line=dict(color=PAL.REAL, width=1.5),
+        line=dict(color=PAL.REAL, width=2),
     ))
+    # Ligne de separation donnees connues / prevision
+    fig.add_vline(x=str(last_train_ts), line_width=1, line_dash="solid", line_color=PAL.BORDER)
+    fig.add_annotation(
+        x=str(last_train_ts), y=1, yref="paper",
+        text="Donnees connues", showarrow=False,
+        font=dict(size=10, color=PAL.TEXT_MUTED),
+        xanchor="right", xshift=-6,
+    )
     fig.add_trace(go.Scatter(
         x=future_ts, y=ridge_pred,
-        mode="lines", name="Ridge",
-        line=dict(color=PAL.LR, width=1.5, dash="dash"),
+        mode="lines", name="Prevision",
+        line=dict(color=PAL.LR, width=1.5, dash="longdash"),
     ))
     fig.add_trace(go.Scatter(
         x=future_ts, y=naive_pred,
-        mode="lines", name="Naif",
-        line=dict(color=PAL.NAIVE, width=1.5, dash="dot"),
+        mode="lines", name="Reference (jour precedent)",
+        line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot"),
     ))
-    if arima_pred is not None:
-        fig.add_trace(go.Scatter(
-            x=future_ts, y=arima_pred,
-            mode="lines", name="ARIMA",
-            line=dict(color=PAL.ARIMA, width=1.5, dash="dashdot"),
-        ))
-    if lstm_pred is not None:
-        fig.add_trace(go.Scatter(
-            x=future_ts, y=lstm_pred,
-            mode="lines", name="LSTM",
-            line=dict(color=PAL.LSTM, width=1.5),
-        ))
 
-    # Ligne de separation train / test
-    fig.add_vline(x=str(last_train_ts), line_width=1, line_dash="solid", line_color=PAL.BORDER)
-
-    # Annotation pic d'erreur Ridge
-    if y_eval is not None:
-        diff = np.abs(y_eval - ridge_pred)
-        peak_idx = int(np.argmax(diff))
-        peak_ts = future_ts[peak_idx] if peak_idx < len(future_ts) else future_ts[-1]
-        fig.add_annotation(
-            x=str(peak_ts), y=float(ridge_pred[peak_idx]),
-            text="Pic d'ecart",
-            showarrow=True, arrowhead=2, arrowcolor=PAL.TEXT_MUTED,
-            font=dict(size=10, color=PAL.TEXT_MUTED),
-        )
+    # Annotation pic d'ecart
+    diff = np.abs(y_eval - ridge_pred)
+    peak_idx = int(np.argmax(diff))
+    peak_ts = future_ts[peak_idx] if peak_idx < len(future_ts) else future_ts[-1]
+    fig.add_annotation(
+        x=str(peak_ts), y=float(ridge_pred[peak_idx]),
+        text="Ecart max",
+        showarrow=True, arrowhead=2, arrowcolor=PAL.TEXT_MUTED,
+        font=dict(size=10, color=PAL.TEXT_MUTED),
+    )
 
     fig.update_layout(
         **_plotly_base(),
@@ -228,114 +172,55 @@ with tab1:
     )
     st.plotly_chart(fig, width="stretch")
 
-# ── Tab 2 : Analyse ───────────────────────────────────────────────────────────
+# ── Tab 2 : Resultats ─────────────────────────────────────────────────────────
 with tab2:
-    if y_eval is None:
-        st.caption("Serie trop courte pour calculer les metriques.")
-    else:
-        rows = []
-        for name, pred in [("Ridge", ridge_pred), ("Naif", naive_pred)]:
-            m = compute_metrics(y_eval, pred)
-            rows.append({"Modele": name, **m})
-        if arima_pred is not None:
-            m = compute_metrics(y_eval, arima_pred)
-            rows.append({"Modele": "ARIMA", **m})
-        if lstm_pred is not None:
-            m = compute_metrics(y_eval, lstm_pred)
-            rows.append({"Modele": "LSTM", **m})
+    mae_ridge = m_ridge["MAE"]
+    mae_naive = m_naive["MAE"]
+    gain = (mae_naive - mae_ridge) / mae_naive * 100 if mae_naive > 0 else 0.0
 
-        metrics_df = pd.DataFrame(rows).set_index("Modele")
-        metrics_df = metrics_df.round(4)
-        st.dataframe(metrics_df, width="stretch")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Erreur prevision (kW)", f"{mae_ridge:.2f}", delta_color="off")
+    c2.metric("Erreur reference (kW)", f"{mae_naive:.2f}", delta_color="off")
+    c3.metric("Gain vs reference", f"{gain:.0f}%", delta_color="off")
 
-        best = metrics_df["MAE"].idxmin()
-        st.caption(f"Meilleur modele selon MAE : {best}")
+    st.caption(
+        "L'erreur est la difference moyenne entre la consommation prevue et la consommation reelle, "
+        "exprimee en kilowatts. La reference repete simplement le jour precedent."
+    )
 
-# ── Tab 3 : Technique ─────────────────────────────────────────────────────────
+# ── Tab 3 : Precision par heure ───────────────────────────────────────────────
 with tab3:
-    st.markdown("**Coefficients Ridge**")
-    coef = ridge.coef_series()
-    top_coef = coef.reindex(coef.abs().nlargest(20).index)
-    fig_coef = go.Figure(go.Bar(
-        x=top_coef.values[::-1],
-        y=top_coef.index[::-1],
-        orientation="h",
-        marker_color=PAL.MULTI[0],
+    hours = np.arange(1, horizon + 1) / 2.0
+
+    fig_h = go.Figure()
+    fig_h.add_trace(go.Scatter(
+        x=hours, y=np.abs(y_eval - ridge_pred),
+        mode="lines", name="Prevision",
+        line=dict(color=PAL.LR, width=1.5),
     ))
-    fig_coef.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Top 20 coefficients Ridge", xaxis_title="Valeur")
-    st.plotly_chart(fig_coef, width="stretch")
+    fig_h.add_trace(go.Scatter(
+        x=hours, y=np.abs(y_eval - naive_pred),
+        mode="lines", name="Reference",
+        line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot"),
+    ))
+    fig_h.update_layout(
+        **_plotly_base(),
+        margin=dict(l=16, r=16, t=32, b=16),
+        title="Ecart de prevision selon l'heure",
+        xaxis_title="Heure de prevision",
+        yaxis_title="Ecart (kW)",
+    )
+    st.plotly_chart(fig_h, width="stretch")
 
-    if arima is not None:
-        st.markdown("**Resume ARIMA**")
-        st.code(arima.summary(), language="text")
-
-    if lstm_model is not None and lstm_model.losses:
-        st.markdown("**Courbe de perte LSTM**")
-        fig_loss = go.Figure(go.Scatter(
-            x=list(range(1, len(lstm_model.losses) + 1)),
-            y=lstm_model.losses,
-            mode="lines",
-            line=dict(color=PAL.LSTM, width=1.5),
-        ))
-        fig_loss.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Loss LSTM", xaxis_title="Epoch", yaxis_title="MSE")
-        st.plotly_chart(fig_loss, width="stretch")
-
-# ── Tab 4 : Horizon ───────────────────────────────────────────────────────────
+# ── Tab 4 : Comment ca marche ─────────────────────────────────────────────────
 with tab4:
-    if y_eval is None:
-        st.caption("Serie trop courte.")
-    else:
-        fig_h = go.Figure()
-        hours = np.arange(1, horizon + 1) / 2.0  # en heures
-        for name, pred, color in [
-            ("Ridge", ridge_pred, PAL.LR),
-            ("Naif", naive_pred, PAL.NAIVE),
-        ]:
-            mae_per_step = np.abs(y_eval - pred)
-            fig_h.add_trace(go.Scatter(
-                x=hours, y=mae_per_step,
-                mode="lines", name=name,
-                line=dict(color=color, width=1.5),
-            ))
-        if arima_pred is not None:
-            mae_per_step = np.abs(y_eval - arima_pred)
-            fig_h.add_trace(go.Scatter(
-                x=hours, y=mae_per_step,
-                mode="lines", name="ARIMA",
-                line=dict(color=PAL.ARIMA, width=1.5, dash="dash"),
-            ))
-        if lstm_pred is not None:
-            mae_per_step = np.abs(y_eval - lstm_pred)
-            fig_h.add_trace(go.Scatter(
-                x=hours, y=mae_per_step,
-                mode="lines", name="LSTM",
-                line=dict(color=PAL.LSTM, width=1.5),
-            ))
-        fig_h.update_layout(
-            **_plotly_base(),
-            margin=dict(l=16, r=16, t=32, b=16),
-            title="MAE par pas d'horizon",
-            xaxis_title="Horizon (heures)",
-            yaxis_title="MAE (kW)",
-        )
-        st.plotly_chart(fig_h, width="stretch")
-
-# ── Tab 5 : Guide ─────────────────────────────────────────────────────────────
-with tab5:
-    st.markdown("**Ridge**")
+    st.markdown("**Prevision intelligente**")
     st.caption(
-        "Regression lineaire regularisee sur les lags temporels et des features de Fourier. "
-        "Rapide, interpretable, adapte aux series avec forte periodicite journaliere."
+        "Le modele analyse les 8 derniers jours de consommation pour predire les 24 prochaines heures. "
+        "Il apprend automatiquement les habitudes journalieres et hebdomadaires du compteur."
     )
-    st.markdown("**ARIMA**")
+    st.markdown("**Reference simple**")
     st.caption(
-        "Modele autoressif integre a moyenne mobile. "
-        "Capture les tendances et l'autocorrelation a court terme. "
-        "Ordre (2,1,2) par defaut."
-    )
-    st.markdown("**LSTM**")
-    st.caption(
-        "Reseau de neurones recurrent a memoire longue. "
-        "Peut capturer des dependances non lineaires complexes. "
-        "Necessite plus de donnees et de temps d'entrainement."
+        "Pour comparaison, la reference repete simplement la consommation du jour precedent. "
+        "Un bon modele doit systematiquement faire mieux que cette reference."
     )
