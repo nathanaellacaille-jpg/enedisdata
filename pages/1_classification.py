@@ -5,10 +5,21 @@ import streamlit as st
 from sklearn.metrics import confusion_matrix, recall_score, accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 
-from config import PAL, CLF_TEST_SIZE, _make_rp_profile, _make_rs_profile
+from config import PAL, CLF_TEST_SIZE, ROOT_DIR, _make_rp_profile, _make_rs_profile
 from models.classifier import EnergyClassifier
 from utils.data_loader import load_default_ts, load_default_labels
 from utils.features import extract_features
+
+
+@st.cache_data
+def _load_baseline_metrics() -> dict | None:
+    """Charge les metriques baseline (CV5 pre-calcule par scripts/phase0_diagnostic.py)."""
+    import json
+    p = ROOT_DIR / "assets" / "baseline_metrics.json"
+    if not p.exists():
+        return None
+    with open(p, "r", encoding="utf-8") as fh:
+        return json.load(fh)
 
 _FEAT_LABELS = {
     "zero_ratio": "Taux d'absence",
@@ -357,36 +368,47 @@ if clf is not None and y_test is not None and y_proba_test is not None:
     st.markdown("---")
     st.markdown("### Performance du modele")
 
-    if cv_scores is not None:
+    baseline = _load_baseline_metrics()
+    if baseline is not None:
+        cv5 = baseline["cv5"]
+        st.caption(
+            f"Validation croisee 5 folds sur {baseline['dataset']['n_samples']} compteurs "
+            f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS, "
+            f"calculee le {baseline['computed_at'][:10]})."
+        )
         c1, c2, c3 = st.columns(3)
         c1.metric(
             "Precision globale",
-            f"{cv_scores['accuracy']:.2%}",
-            f"± {cv_scores['accuracy_std']:.2%}",
+            f"{cv5['accuracy']:.2%}",
+            f"± {cv5['accuracy_std']:.2%}",
             delta_color="off",
         )
         c2.metric(
             "Equilibre RS / RP",
-            f"{cv_scores['f1']:.2%}",
-            f"± {cv_scores['f1_std']:.2%}",
+            f"{cv5['f1_weighted']:.2%}",
+            f"± {cv5['f1_weighted_std']:.2%}",
             delta_color="off",
         )
         c3.metric(
             "Detection residences secondaires",
-            f"{cv_scores['recall_rs']:.2%}",
-            f"± {cv_scores['recall_rs_std']:.2%}",
+            f"{cv5['recall_rs']:.2%}",
+            f"± {cv5['recall_rs_std']:.2%}",
             delta_color="off",
         )
 
-    cm = confusion_matrix(y_test, y_pred)
+        conf = baseline["confusion"]
+        cm_arr = np.array([[conf["tn"], conf["fp"]], [conf["fn"], conf["tp"]]])
+    else:
+        cm_arr = confusion_matrix(y_test, y_pred)
+
     labels_names = ["RP", "RS"]
     fig_cm = go.Figure(go.Heatmap(
-        z=cm,
+        z=cm_arr,
         x=labels_names,
         y=labels_names,
         colorscale=[[0, "#FFFFFF"], [0.5, "#94A3B8"], [1, "#0F172A"]],
         showscale=True,
-        text=cm.astype(str),
+        text=cm_arr.astype(str),
         texttemplate="%{text}",
     ))
     fig_cm.update_layout(

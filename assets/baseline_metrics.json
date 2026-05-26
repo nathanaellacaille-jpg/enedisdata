@@ -1,0 +1,34 @@
+{
+  "computed_at": "2026-05-26T20:34:48Z",
+  "dataset": {
+    "n_samples": 500,
+    "n_features": 26,
+    "n_rp": 428,
+    "n_rs": 72,
+    "imbalance_ratio": 5.94
+  },
+  "cv5": {
+    "accuracy": 0.944,
+    "accuracy_std": 0.013564659966250503,
+    "f1_weighted": 0.9428630973777476,
+    "f1_weighted_std": 0.014197671824423838,
+    "recall_rs": 0.7647619047619048,
+    "recall_rs_std": 0.06691111645809636,
+    "precision_rs": 0.8352747252747251,
+    "precision_rs_std": 0.05042369024727296,
+    "auc": 0.9687723275356653,
+    "auc_std": 0.02018831380831555,
+    "threshold_mean": 0.8637598426529257
+  },
+  "confusion": {
+    "tn": 417,
+    "fp": 11,
+    "fn": 17,
+    "tp": 55,
+    "recall_rp": 0.9742990654205608,
+    "recall_rs": 0.7638888888888888,
+    "n_errors": 28,
+    "n_false_negatives_rs": 17,
+    "n_false_positives_rs": 11
+  }
+}

@@ -182,6 +182,50 @@ def main() -> None:
           f"AUC = {np.mean(metrics['auc']):.4f}")
     print("=" * 72)
 
+    # Dump baseline metrics en JSON pour affichage dans la page Streamlit
+    # (evite de recomputer le CV5 a chaque cold start Cloud).
+    import json
+    from datetime import datetime
+    out = ROOT / "assets" / "baseline_metrics.json"
+    out.parent.mkdir(exist_ok=True)
+    payload = {
+        "computed_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "dataset": {
+            "n_samples": int(len(y)),
+            "n_features": int(X.shape[1]),
+            "n_rp": n_rp,
+            "n_rs": n_rs,
+            "imbalance_ratio": round(max(n_rp, n_rs) / min(n_rp, n_rs), 2),
+        },
+        "cv5": {
+            "accuracy": float(np.mean(metrics["accuracy"])),
+            "accuracy_std": float(np.std(metrics["accuracy"])),
+            "f1_weighted": float(np.mean(metrics["f1_weighted"])),
+            "f1_weighted_std": float(np.std(metrics["f1_weighted"])),
+            "recall_rs": float(np.mean(metrics["recall_rs"])),
+            "recall_rs_std": float(np.std(metrics["recall_rs"])),
+            "precision_rs": float(np.mean(metrics["precision_rs"])),
+            "precision_rs_std": float(np.std(metrics["precision_rs"])),
+            "auc": float(np.mean(metrics["auc"])),
+            "auc_std": float(np.std(metrics["auc"])),
+            "threshold_mean": float(np.mean(metrics["threshold"])),
+        },
+        "confusion": {
+            "tn": int(cm[0, 0]),
+            "fp": int(cm[0, 1]),
+            "fn": int(cm[1, 0]),
+            "tp": int(cm[1, 1]),
+            "recall_rp": float(cm[0, 0] / cm[0].sum()),
+            "recall_rs": float(cm[1, 1] / cm[1].sum()),
+            "n_errors": int(len(errors)),
+            "n_false_negatives_rs": int(len(fn)),
+            "n_false_positives_rs": int(len(fp)),
+        },
+    }
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, ensure_ascii=False)
+    print(f"\nMetriques baseline ecrites dans {out}")
+
 
 if __name__ == "__main__":
     main()
