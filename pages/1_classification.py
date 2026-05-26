@@ -302,15 +302,15 @@ if clf is not None and not meter_feat.empty:
     tick_text = [f"{h}h" for h in range(0, 24, 2)]
     fig_radar.add_trace(go.Scatter(
         x=slots, y=mp, mode="lines", name="Compteur",
-        line=dict(color=PAL.MULTI[0], width=2.8),
+        line=dict(color=PAL.ACCENT[0], width=2.8),
     ))
     fig_radar.add_trace(go.Scatter(
         x=slots, y=rp_ref, mode="lines", name="Ref residence principale (RP)",
-        line=dict(color=PAL.MULTI[3], width=1.8, dash="dash"),
+        line=dict(color=PAL.ACCENT[1], width=1.8, dash="dash"),
     ))
     fig_radar.add_trace(go.Scatter(
         x=slots, y=rs_ref, mode="lines", name="Ref residence secondaire (RS)",
-        line=dict(color=PAL.MULTI[5], width=1.8, dash="dot"),
+        line=dict(color=PAL.ACCENT[2], width=1.8, dash="dot"),
     ))
     _radar_layout = {
         **_plotly_base(),

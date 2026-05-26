@@ -21,6 +21,7 @@ enedis/
 
 - Python 3.11+
 - Jamais de couleur hardcodée dans pages/ — toujours `PAL.xxx` de config.py
+- Couleurs de traces de graphiques : `PAL.ACCENT[i]` (palette vive autorisée pour distinguer les courbes). L'UI/CSS reste en niveaux de gris.
 - Jamais d'import circulaire : pages/ importe uniquement utils/ et models/
 - `st.cache_data` sur toute lecture de fichier et tout calcul reproductible
 - `st.cache_resource` sur tout entraînement de modèle

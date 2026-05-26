@@ -18,6 +18,10 @@ class Palette:
         "#0F172A", "#1E293B", "#334155", "#475569",
         "#64748B", "#94A3B8", "#CBD5E1", "#E2E8F0",
     ])
+    # Couleurs de traces (graphiques uniquement, jamais dans l'UI/CSS)
+    ACCENT: List[str] = field(default_factory=lambda: [
+        "#2563EB", "#F59E0B", "#10B981", "#DB2777", "#8B5CF6", "#0891B2",
+    ])
 
 
 PAL = Palette()

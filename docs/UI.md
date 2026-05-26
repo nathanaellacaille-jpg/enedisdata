@@ -5,7 +5,10 @@ Règles d'interface. Référencées par CLAUDE.md — s'appliquent à chaque fic
 ## Principe
 
 Interface sobre, light mode, inspiration Apple/Linear.
-Aucune couleur décorative. Tout passe par le contraste et l'espacement.
+Aucune couleur décorative dans l'UI (CSS, métriques, bordures, fonds, texte) :
+tout passe par le contraste et l'espacement.
+Exception : les **traces de graphiques** peuvent utiliser la palette colorée
+`PAL.ACCENT` pour distinguer les courbes (voir section Graphiques Plotly).
 
 ## Thème Streamlit — .streamlit/config.toml
 
@@ -23,19 +26,20 @@ headless = true
 
 ## Palette — config.py
 
-Niveaux de gris uniquement. Jamais de couleur sémantique (rouge/vert/bleu) dans l'UI.
+Niveaux de gris pour l'UI. Jamais de couleur sémantique (rouge/vert/bleu)
+dans le CSS, les métriques, bordures, fonds ou texte.
+Les couleurs vives sont réservées aux **traces de graphiques** via `PAL.ACCENT`.
 
 ```python
-RS, RP   = "#0F172A", "#0F172A"    # différenciés par line_dash, pas par couleur
 LR       = "#0F172A"
 ARIMA    = "#475569"
 LSTM     = "#94A3B8"
-NAIVE    = "#CBD5E1"
 REAL     = "#0F172A"
 BORDER   = "#E2E8F0"
 TEXT     = "#0F172A"
 TEXT_MUTED = "#64748B"
 MULTI    = ["#0F172A","#1E293B","#334155","#475569","#64748B","#94A3B8","#CBD5E1","#E2E8F0"]
+ACCENT   = ["#2563EB","#F59E0B","#10B981","#DB2777","#8B5CF6","#0891B2"]  # traces seulement
 ```
 
 ## CSS — assets/style.css
@@ -93,10 +97,11 @@ fig.update_layout(
 ```
 
 Traces :
-- `line=dict(width=1.5)` — jamais plus épais
-- RS vs RP : même couleur (`PAL.REAL`), distingués par `line_dash="dash"` pour l'un
+- Distinguer les courbes par couleur via `PAL.ACCENT[i]`, combinée si besoin
+  à `line_dash` ("dash"/"dot") et à l'épaisseur (courbe principale jusqu'à ~2.8)
+- Heatmap et gauge restent en niveaux de gris (pas de couleur sémantique)
 - Colorscale heatmap : `[[0,"#FFFFFF"],[0.5,"#94A3B8"],[1,"#0F172A"]]`
-- Gauge steps : `["#F8FAFC","#E2E8F0","#0F172A"]` — jamais de rouge/vert/bleu
+- Gauge steps : `["#F8FAFC","#E2E8F0","#334155"]`
 
 ## Texte dans l'UI
 
