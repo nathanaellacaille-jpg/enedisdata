@@ -5,7 +5,17 @@ import pandas as pd
 import streamlit as st
 
 from config import DEFAULT_TS_PATH, DEFAULT_LBL_PATH, DATA_URL_TS, ROOT_DIR, MAX_METERS_UPLOAD
-from utils.parser import parse_timeseries, parse_labels
+
+
+def _parsers():
+    """Import lazy pour contourner le bug Python 3.14 + Streamlit preload
+    qui empeche `from utils.X import Y` de fonctionner depuis un module preloade.
+    """
+    import sys
+    parser_mod = sys.modules.get("utils.parser")
+    if parser_mod is None or not hasattr(parser_mod, "parse_timeseries"):
+        from utils import parser as parser_mod  # fallback : import direct
+    return parser_mod.parse_timeseries, parser_mod.parse_labels
 
 
 CACHE_DIR = Path(tempfile.gettempdir()) / "enedis-data"
@@ -61,12 +71,14 @@ def _resolve_ts_path() -> Path | None:
 @st.cache_data(show_spinner="Chargement du jeu de donnees...")
 def _load_ts_cached(path_str: str, mtime: float, size: int, max_meters: int | None) -> pd.DataFrame:
     """Parse le CSV timeseries depuis le disque (cache invalide si fichier modifie)."""
+    parse_timeseries, _ = _parsers()
     return parse_timeseries(path_str, max_meters=max_meters)
 
 
 @st.cache_data(show_spinner="Chargement des labels...")
 def _load_labels_cached(path_str: str, mtime: float, size: int) -> dict:
     """Parse le CSV labels depuis le disque (cache invalide si fichier modifie)."""
+    _, parse_labels = _parsers()
     return parse_labels(path_str)
 
 
