@@ -8,6 +8,17 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 
+# Nuke any stale half-loaded project modules from sys.modules.
+# Streamlit Cloud's hot-reload ("Updated app!") ne redemarre PAS le process Python,
+# donc sys.modules garde les modules potentiellement casses des deploys precedents.
+# Sans ce nettoyage, _preload skip via `if name in sys.modules` et on utilise
+# les versions perime/cassees.
+for _stale in [m for m in list(sys.modules) if m == "config"
+               or m == "utils" or m.startswith("utils.")
+               or m == "models" or m.startswith("models.")]:
+    del sys.modules[_stale]
+
+
 def _preload(name: str, path: Path, is_pkg: bool = False) -> None:
     """Charge un module dans sys.modules via importlib, sans instruction import.
 
@@ -18,12 +29,11 @@ def _preload(name: str, path: Path, is_pkg: bool = False) -> None:
     En chargeant les fichiers directement avec spec_from_file_location on
     court-circuite entierement le mecanisme d'import defaillant.
 
-    IMPORTANT : on doit aussi setter l'attribut sur le package parent, sinon
-    `from utils.X import Y` echoue avec ImportError sur Python 3.14 strict
-    meme si le module est correctement dans sys.modules.
+    Set aussi l'attribut sur le package parent pour faire fonctionner
+    `from parent.child import X` sur Python 3.14 strict.
+
+    Force re-exec si module deja la (peut etre half-loaded d'un deploy precedent).
     """
-    if name in sys.modules:
-        return
     spec = importlib.util.spec_from_file_location(
         name, path,
         submodule_search_locations=[str(path.parent)] if is_pkg else None,
