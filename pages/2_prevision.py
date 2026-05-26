@@ -181,19 +181,19 @@ with tab1:
     fig.add_trace(go.Scatter(
         x=future_ts, y=ridge_pred,
         mode="lines", name="Ridge",
-        line=dict(color=PAL.LR, width=1.5, dash="longdash"),
+        line=dict(color=PAL.ACCENT[0], width=1.5, dash="longdash"),
     ))
     if arima_pred is not None:
         fig.add_trace(go.Scatter(
             x=future_ts, y=arima_pred,
             mode="lines", name="ARIMA",
-            line=dict(color=PAL.ARIMA, width=1.5, dash="dash"),
+            line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
         ))
     if lstm_pred is not None:
         fig.add_trace(go.Scatter(
             x=future_ts, y=lstm_pred,
             mode="lines", name="LSTM",
-            line=dict(color=PAL.LSTM, width=1.5, dash="dashdot"),
+            line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot"),
         ))
     fig.add_trace(go.Scatter(
         x=future_ts, y=naive_pred,
@@ -239,7 +239,7 @@ with tab2:
     # Classement MAE sous forme de barres
     sorted_names = sorted(mae_vals, key=mae_vals.get)
     sorted_mae = [mae_vals[n] for n in sorted_names]
-    bar_colors = [PAL.MULTI[0] if n == best else PAL.MULTI[4] for n in sorted_names]
+    bar_colors = [PAL.ACCENT[0] if n == best else PAL.MULTI[4] for n in sorted_names]
 
     fig_bar = go.Figure(go.Bar(
         x=sorted_mae,
@@ -264,19 +264,19 @@ with tab3:
     fig_h.add_trace(go.Scatter(
         x=hours, y=np.abs(y_eval - ridge_pred),
         mode="lines", name="Ridge",
-        line=dict(color=PAL.LR, width=1.5),
+        line=dict(color=PAL.ACCENT[0], width=1.5),
     ))
     if arima_pred is not None:
         fig_h.add_trace(go.Scatter(
             x=hours, y=np.abs(y_eval - arima_pred),
             mode="lines", name="ARIMA",
-            line=dict(color=PAL.ARIMA, width=1.5, dash="dash"),
+            line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
         ))
     if lstm_pred is not None:
         fig_h.add_trace(go.Scatter(
             x=hours, y=np.abs(y_eval - lstm_pred),
             mode="lines", name="LSTM",
-            line=dict(color=PAL.LSTM, width=1.5, dash="dashdot"),
+            line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot"),
         ))
     fig_h.add_trace(go.Scatter(
         x=hours, y=np.abs(y_eval - naive_pred),

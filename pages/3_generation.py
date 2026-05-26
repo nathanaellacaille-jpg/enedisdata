@@ -138,7 +138,7 @@ mean_curve = gen_df_sorted.groupby("t")["kw"].mean()
 fig_main.add_trace(go.Scatter(
     x=mean_curve.index, y=mean_curve.values,
     mode="lines", name="Moyenne des courbes generees",
-    line=dict(color=PAL.REAL, width=2),
+    line=dict(color=PAL.ACCENT[0], width=2),
 ))
 
 day_ticks = list(range(0, total_slots, STEPS_PER_DAY))
@@ -172,12 +172,12 @@ else:
         fig_a.add_trace(go.Scatter(
             x=hours, y=report["profile_real"],
             mode="lines", name="Reel",
-            line=dict(color=PAL.REAL, width=1.5),
+            line=dict(color=PAL.ACCENT[0], width=1.5),
         ))
         fig_a.add_trace(go.Scatter(
             x=hours, y=report["profile_gen"],
             mode="lines", name="Genere",
-            line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dash"),
+            line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
         ))
         fig_a.update_layout(
             **_plotly_base(),
@@ -207,11 +207,11 @@ else:
         fig_b = go.Figure()
         fig_b.add_trace(go.Histogram(
             x=e_real, xbins=dict(start=lo, end=hi, size=size),
-            name="Reel", marker_color=PAL.REAL, opacity=0.55, histnorm="probability",
+            name="Reel", marker_color=PAL.ACCENT[0], opacity=0.55, histnorm="probability",
         ))
         fig_b.add_trace(go.Histogram(
             x=e_gen, xbins=dict(start=lo, end=hi, size=size),
-            name="Genere", marker_color=PAL.TEXT_MUTED, opacity=0.55, histnorm="probability",
+            name="Genere", marker_color=PAL.ACCENT[1], opacity=0.55, histnorm="probability",
         ))
         fig_b.update_layout(
             **_plotly_base(),
