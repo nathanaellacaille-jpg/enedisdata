@@ -3,10 +3,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, FCST_ARIMA_ORDER, MAX_METERS_UPLOAD
+from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, FCST_ARIMA_ORDER
 from models.forecaster import RidgeForecaster, ARIMAForecaster, LSTMForecaster
+from utils.data_loader import load_default_ts
 from utils.metrics import compute_metrics
-from utils.parser import parse_timeseries
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -26,13 +26,6 @@ def _plotly_base() -> dict:
         yaxis=dict(gridcolor="#F1F5F9", linecolor=PAL.BORDER,
                    tickfont=dict(size=11, color=PAL.TEXT_MUTED)),
     )
-
-
-@st.cache_data
-def _load_ts(file_bytes: bytes, file_name: str) -> pd.DataFrame:
-    """Charge et parse le CSV timeseries."""
-    import io
-    return parse_timeseries(io.BytesIO(file_bytes), max_meters=MAX_METERS_UPLOAD)
 
 
 @st.cache_resource
@@ -73,17 +66,8 @@ def _naive_forecast(series: np.ndarray, h: int) -> np.ndarray:
 
 with st.sidebar:
     st.markdown("**Donnees**")
-    ts_file = st.file_uploader("Timeseries CSV", type=["csv"], key="fcst_ts")
-
-    if ts_file is not None:
-        if st.session_state.get("_ts_file_name") != ts_file.name:
-            try:
-                st.session_state["_ts_df"] = _load_ts(ts_file.getvalue(), ts_file.name)
-                st.session_state["_ts_file_name"] = ts_file.name
-            except ValueError as e:
-                st.error(str(e))
-
-    df = st.session_state.get("_ts_df")
+    df = load_default_ts()
+    st.session_state["_ts_df"] = df
     selected = None
 
     if df is not None:
@@ -105,7 +89,7 @@ with st.sidebar:
 st.markdown("## Prevision")
 
 if df is None or selected is None:
-    st.caption("Chargez un fichier timeseries CSV pour commencer.")
+    st.caption("Jeu de donnees indisponible.")
     st.stop()
 
 meter_df = df[df["meter_id"] == selected].sort_values("ts").reset_index(drop=True)

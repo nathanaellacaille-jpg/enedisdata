@@ -7,8 +7,8 @@ _REQUIRED_TS = {"id", "horodate", "valeur"}
 _REQUIRED_LBL = {"id", "label"}
 
 
-def parse_timeseries(file, max_meters: int = MAX_METERS_UPLOAD) -> pd.DataFrame:
-    """Lit un CSV Enedis par chunks, retourne df [meter_id, ts, kw] (max max_meters compteurs)."""
+def parse_timeseries(file, max_meters: int | None = MAX_METERS_UPLOAD) -> pd.DataFrame:
+    """Lit un CSV Enedis par chunks, retourne df [meter_id, ts, kw] (max_meters=None pour tous les compteurs)."""
     # Detecte le separateur sur un echantillon sans consommer le flux
     if hasattr(file, "read"):
         sample_bytes = file.read(4096)
@@ -35,17 +35,21 @@ def parse_timeseries(file, max_meters: int = MAX_METERS_UPLOAD) -> pd.DataFrame:
         chunk = chunk.rename(columns={"id": "meter_id", "horodate": "ts", "valeur": "kw"})
         chunk["meter_id"] = chunk["meter_id"].astype(str)
 
-        # Ajoute les nouveaux ids dans la limite max_meters
+        # Ajoute les nouveaux ids (cap eventuel via max_meters)
         new_ids = set(chunk["meter_id"].unique()) - seen_ids
-        remaining = max_meters - len(seen_ids)
-        if new_ids and remaining > 0:
-            seen_ids |= set(list(new_ids)[:remaining])
+        if max_meters is None:
+            seen_ids |= new_ids
+            filtered = chunk
+        else:
+            remaining = max_meters - len(seen_ids)
+            if new_ids and remaining > 0:
+                seen_ids |= set(list(new_ids)[:remaining])
+            filtered = chunk[chunk["meter_id"].isin(seen_ids)]
 
-        filtered = chunk[chunk["meter_id"].isin(seen_ids)]
         if not filtered.empty:
             chunks.append(filtered)
 
-        if len(seen_ids) >= max_meters:
+        if max_meters is not None and len(seen_ids) >= max_meters:
             break
 
     if not chunks:

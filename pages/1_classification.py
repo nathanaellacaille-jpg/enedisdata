@@ -5,10 +5,10 @@ import streamlit as st
 from sklearn.metrics import confusion_matrix, recall_score, accuracy_score, f1_score
 from sklearn.model_selection import train_test_split, StratifiedKFold
 
-from config import PAL, CLF_TEST_SIZE, CLF_N_TREES, CLF_RS_THRESHOLD, MAX_METERS_UPLOAD, _make_rp_profile, _make_rs_profile
+from config import PAL, CLF_TEST_SIZE, CLF_N_TREES, CLF_RS_THRESHOLD, _make_rp_profile, _make_rs_profile
 from models.classifier import EnergyClassifier
+from utils.data_loader import load_default_ts, load_default_labels
 from utils.features import extract_features
-from utils.parser import parse_timeseries, parse_labels
 
 _FEAT_LABELS = {
     "zero_ratio": "Taux d'absence",
@@ -48,20 +48,6 @@ def _plotly_base() -> dict:
         yaxis=dict(gridcolor="#F1F5F9", linecolor=PAL.BORDER,
                    tickfont=dict(size=11, color=PAL.TEXT_MUTED)),
     )
-
-
-@st.cache_data
-def _load_ts(file_bytes: bytes, file_name: str) -> pd.DataFrame:
-    """Charge et parse le CSV timeseries depuis les bytes."""
-    import io
-    return parse_timeseries(io.BytesIO(file_bytes), max_meters=MAX_METERS_UPLOAD)
-
-
-@st.cache_data
-def _load_labels(file_bytes: bytes, file_name: str) -> dict:
-    """Charge et parse le CSV labels depuis les bytes."""
-    import io
-    return parse_labels(io.BytesIO(file_bytes))
 
 
 @st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
@@ -153,26 +139,12 @@ def _train_model(features: pd.DataFrame, labels: dict):
 
 with st.sidebar:
     st.markdown("**Donnees**")
-    ts_file = st.file_uploader("Timeseries CSV", type=["csv"], key="clf_ts")
-    lbl_file = st.file_uploader("Labels CSV (optionnel)", type=["csv"], key="clf_lbl")
+    df = load_default_ts()
+    st.session_state["_ts_df"] = df
+    labels_loaded = load_default_labels()
+    if labels_loaded is not None:
+        st.session_state["_labels"] = labels_loaded
 
-    if ts_file is not None:
-        if st.session_state.get("_ts_file_name") != ts_file.name:
-            try:
-                st.session_state["_ts_df"] = _load_ts(ts_file.getvalue(), ts_file.name)
-                st.session_state["_ts_file_name"] = ts_file.name
-            except ValueError as e:
-                st.error(str(e))
-
-    if lbl_file is not None:
-        if st.session_state.get("_labels_file_name") != lbl_file.name:
-            try:
-                st.session_state["_labels"] = _load_labels(lbl_file.getvalue(), lbl_file.name)
-                st.session_state["_labels_file_name"] = lbl_file.name
-            except ValueError as e:
-                st.error(str(e))
-
-    df = st.session_state.get("_ts_df")
     if df is not None:
         n_meters = df["meter_id"].nunique()
         st.caption(f"{n_meters} compteurs charges · {len(df):,} points")
@@ -194,7 +166,7 @@ with st.sidebar:
 st.markdown("## Classification")
 
 if df is None:
-    st.caption("Chargez un fichier timeseries CSV pour commencer.")
+    st.caption("Jeu de donnees indisponible.")
     st.stop()
 
 # Features globales

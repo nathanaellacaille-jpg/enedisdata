@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List
 import numpy as np
+
+ROOT_DIR = Path(__file__).resolve().parent
+DEFAULT_TS_PATH = ROOT_DIR / "RES2-6-9.csv"
+DEFAULT_LBL_PATH = ROOT_DIR / "RES2-6-9-labels.csv"
 
 
 @dataclass(frozen=True)
@@ -49,7 +54,7 @@ GEN_NOISE_RHO = 0.7  # autocorrélation AR(1) entre slots consécutifs
 GEN_CORPUS_N = 300    # courbes par classe dans le corpus de référence built-in
 GEN_CORPUS_DAYS = 14  # jours par courbe dans le corpus
 
-MAX_METERS_UPLOAD = 200
+MAX_METERS_UPLOAD = None
 
 
 def _make_rp_profile() -> np.ndarray:

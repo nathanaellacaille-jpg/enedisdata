@@ -1,13 +1,12 @@
-import io
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, GEN_NOISE_STD, MAX_METERS_UPLOAD, STEPS_PER_DAY
+from config import PAL, GEN_NOISE_STD, STEPS_PER_DAY
 from models.generator import CurveGenerator
-from utils.parser import parse_timeseries, parse_labels
 from utils.corpus import load_builtin_corpus
+from utils.data_loader import load_default_ts, load_default_labels
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -30,35 +29,22 @@ def _plotly_base() -> dict:
 
 
 @st.cache_resource
-def _fit_generator(ts_key: str, lbl_key: str, ts_bytes: bytes | None, lbl_bytes: bytes | None) -> CurveGenerator:
-    """Calibre le generateur — corpus built-in si aucun upload."""
+def _fit_generator(ts_key: str, lbl_key: str, _df: pd.DataFrame | None, _labels: dict | None) -> CurveGenerator:
+    """Calibre le generateur — corpus built-in si le jeu de donnees est absent."""
     gen = CurveGenerator()
-    if ts_bytes and lbl_bytes:
-        df = parse_timeseries(io.BytesIO(ts_bytes), max_meters=MAX_METERS_UPLOAD)
-        labels = parse_labels(io.BytesIO(lbl_bytes))
+    if _df is not None and _labels is not None:
+        gen.fit(_df, _labels)
     else:
-        df, labels = load_builtin_corpus()
-    gen.fit(df, labels)
+        df_b, labels_b = load_builtin_corpus()
+        gen.fit(df_b, labels_b)
     return gen
 
 
 @st.cache_data
-def _load_real(ts_bytes: bytes, ts_key: str) -> pd.DataFrame:
-    """Charge la timeseries reelle pour la validation."""
-    return parse_timeseries(io.BytesIO(ts_bytes), max_meters=MAX_METERS_UPLOAD)
-
-
-@st.cache_data
-def _load_labels_dict(lbl_bytes: bytes, lbl_key: str) -> dict:
-    """Charge le dict de labels meter_id -> int."""
-    return parse_labels(io.BytesIO(lbl_bytes))
-
-
-@st.cache_data
 def _generate(ts_key: str, lbl_key: str, n: int, curve_type: str, n_days: int,
-              ts_bytes: bytes | None, lbl_bytes: bytes | None, mode: str = "parametric") -> pd.DataFrame:
+              _df: pd.DataFrame | None, _labels: dict | None, mode: str = "parametric") -> pd.DataFrame:
     """Genere n courbes en mode parametrique ou reechantillonnage."""
-    gen = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
+    gen = _fit_generator(ts_key, lbl_key, _df, _labels)
     if mode == "bootstrap":
         return gen.generate_bootstrap(n, curve_type, n_days, GEN_NOISE_STD)
     return gen.generate(n, curve_type, n_days, GEN_NOISE_STD)
@@ -67,17 +53,13 @@ def _generate(ts_key: str, lbl_key: str, n: int, curve_type: str, n_days: int,
 # ── sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("**Calibration (optionnel)**")
-    ts_file = st.file_uploader("Timeseries CSV", type=["csv"], key="gen_ts")
-    lbl_file = st.file_uploader("Labels CSV", type=["csv"], key="gen_lbl")
-
-    if ts_file is not None and st.session_state.get("_gen_ts_file_name") != ts_file.name:
-        st.session_state["_gen_ts_bytes"] = ts_file.getvalue()
-        st.session_state["_gen_ts_file_name"] = ts_file.name
-
-    if lbl_file is not None and st.session_state.get("_gen_lbl_file_name") != lbl_file.name:
-        st.session_state["_gen_lbl_bytes"] = lbl_file.getvalue()
-        st.session_state["_gen_lbl_file_name"] = lbl_file.name
+    st.markdown("**Calibration**")
+    real_df = load_default_ts()
+    labels = load_default_labels()
+    if real_df is not None and labels is not None:
+        st.caption(f"{real_df['meter_id'].nunique()} compteurs · {len(real_df):,} points")
+    else:
+        st.caption("Corpus de reference (jeu de donnees absent)")
 
     st.markdown(
         '<div class="sidebar-footer">'
@@ -92,19 +74,14 @@ with st.sidebar:
 
 st.markdown("## Generation")
 
-ts_bytes = st.session_state.get("_gen_ts_bytes")
-lbl_bytes = st.session_state.get("_gen_lbl_bytes")
-ts_key = st.session_state.get("_gen_ts_file_name", "none")
-lbl_key = st.session_state.get("_gen_lbl_file_name", "none")
+has_real = real_df is not None and labels is not None
+ts_key = "default_ts" if has_real else "corpus"
+lbl_key = "default_lbl" if has_real else "corpus"
 
-has_upload = ts_bytes is not None and lbl_bytes is not None
-corpus_df, corpus_labels = load_builtin_corpus()
-
-if has_upload:
-    real_df = _load_real(ts_bytes, ts_key)
-    labels = _load_labels_dict(lbl_bytes, lbl_key)
+if has_real:
     st.caption(f"Calibre sur {real_df['meter_id'].nunique()} compteurs reels — {len(real_df):,} points")
 else:
+    corpus_df, corpus_labels = load_builtin_corpus()
     real_df = corpus_df
     labels = corpus_labels
     st.caption(f"Corpus de reference — {corpus_df['meter_id'].nunique()} courbes synthetiques")
@@ -115,7 +92,7 @@ else:
 curve_type = st.radio("Type", ["RS", "RP"], horizontal=True, key="gen_type")
 
 N_DAYS = 7
-gen_df = _generate(ts_key, lbl_key, 50, curve_type, N_DAYS, ts_bytes, lbl_bytes, "bootstrap")
+gen_df = _generate(ts_key, lbl_key, 50, curve_type, N_DAYS, real_df, labels, "bootstrap")
 
 
 # ── graphique principal : N courbes sur 7 jours ──────────────────────────────
@@ -158,7 +135,7 @@ st.plotly_chart(fig_main, width="stretch")
 
 st.markdown("### Qualite de generation")
 
-gen = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
+gen = _fit_generator(ts_key, lbl_key, real_df, labels)
 report = gen.similarity_report(real_df, labels, gen_df, curve_type)
 
 if not report["has_real"]:
@@ -189,7 +166,7 @@ else:
         )
         st.plotly_chart(fig_a, width="stretch")
         st.metric("Ressemblance de profil", f"{report['pearson_profile'] * 100:.0f} %", delta_color="off")
-        if has_upload and report["discriminative_score"] is not None:
+        if has_real and report["discriminative_score"] is not None:
             indiscernabilite = max(0.0, 1.0 - abs(report["discriminative_score"] - 0.5) * 2) * 100
             st.metric(
                 "Indiscernabilite",
@@ -243,4 +220,3 @@ with k3:
     delta_r = f"reel : {report['we_ratio_real']:.2f}" if report["we_ratio_real"] is not None else None
     st.metric("Rapport weekend", f"{report['we_ratio_gen']:.2f}",
               delta=delta_r, delta_color="off")
-
