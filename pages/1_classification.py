@@ -222,7 +222,7 @@ we_wd = meter_feat["ratio_we_wd"].iloc[0] if not meter_feat.empty else 0.0
 energy_j = mean_conso
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Resultat", "Vue d'ensemble", "Explication", "Performance", "Export"])
+tab1, tab2, tab3, tab4 = st.tabs(["Resultat", "Vue d'ensemble", "Explication", "Performance"])
 
 # ── Tab 1 : Resultat ──────────────────────────────────────────────────────────
 with tab1:
@@ -444,25 +444,3 @@ with tab4:
             yaxis_title="Reel",
         )
         st.plotly_chart(fig_cm, width="stretch")
-
-# ── Tab 5 : Export ────────────────────────────────────────────────────────────
-with tab5:
-    if pred_series.empty:
-        st.caption("Aucune prediction disponible.")
-    else:
-        export_df = pd.DataFrame({
-            "meter_id": pred_series.index,
-            "classe_predite": pred_series.values,
-            "label_predit": ["RS" if v == 1 else "RP" for v in pred_series.values],
-        })
-        if labels is not None:
-            export_df["vrai_label"] = [
-                "RS" if labels.get(str(mid)) == 1 else ("RP" if labels.get(str(mid)) == 0 else "?")
-                for mid in pred_series.index
-            ]
-        if not proba_series.empty:
-            export_df["proba_rs"] = proba_series.reindex(pred_series.index).values
-
-        st.dataframe(export_df, width="stretch")
-        csv_bytes = export_df.to_csv(index=False).encode("utf-8")
-        st.download_button("Telecharger CSV", csv_bytes, file_name="predictions.csv", mime="text/csv")
