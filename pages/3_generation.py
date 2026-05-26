@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, GEN_DEFAULT_N, GEN_NOISE_STD, MAX_METERS_UPLOAD, STEPS_PER_DAY
+from config import PAL, GEN_NOISE_STD, MAX_METERS_UPLOAD, STEPS_PER_DAY
 from models.generator import CurveGenerator
 from utils.parser import parse_timeseries, parse_labels
 from utils.corpus import load_builtin_corpus
@@ -112,17 +112,10 @@ else:
 
 # ── controles ─────────────────────────────────────────────────────────────────
 
-col_ctrl_1, col_ctrl_2, col_ctrl_3 = st.columns([1, 3, 2])
-with col_ctrl_1:
-    curve_type = st.radio("Type", ["RS", "RP"], horizontal=True, key="gen_type")
-with col_ctrl_2:
-    n_curves = st.slider("Courbes generees", 1, 50, GEN_DEFAULT_N, key="gen_n")
-with col_ctrl_3:
-    gen_mode = st.radio("Mode", ["Parametrique", "Reechantillonnage"], horizontal=True, key="gen_mode")
+curve_type = st.radio("Type", ["RS", "RP"], horizontal=True, key="gen_type")
 
 N_DAYS = 7
-mode = "bootstrap" if gen_mode == "Reechantillonnage" else "parametric"
-gen_df = _generate(ts_key, lbl_key, n_curves, curve_type, N_DAYS, ts_bytes, lbl_bytes, mode)
+gen_df = _generate(ts_key, lbl_key, 50, curve_type, N_DAYS, ts_bytes, lbl_bytes, "bootstrap")
 
 
 # ── graphique principal : N courbes sur 7 jours ──────────────────────────────
@@ -153,7 +146,7 @@ day_labels = [f"J{d + 1}" for d in range(N_DAYS)]
 fig_main.update_layout(
     **_plotly_base(),
     margin=dict(l=16, r=16, t=32, b=16),
-    title=f"{n_curves} courbes {curve_type} sur 7 jours (pas 30 min)",
+    title=f"50 courbes {curve_type} sur 7 jours (pas 30 min)",
     yaxis_title="Puissance (kW)",
     height=380,
 )
