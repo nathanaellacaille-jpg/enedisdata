@@ -50,13 +50,13 @@ def _plotly_base() -> dict:
     )
 
 
-@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
+@st.cache_data(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
 def _compute_features(df: pd.DataFrame) -> pd.DataFrame:
     """Calcule les features par compteur."""
     return extract_features(df)
 
 
-@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
+@st.cache_data(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
 def _predict_all(features: pd.DataFrame, labels: dict) -> tuple:
     """Predit classes et probabilites pour tous les compteurs (cache par dataset)."""
     clf, *_ = _train_model(features, labels)
@@ -69,13 +69,13 @@ def _predict_all(features: pd.DataFrame, labels: dict) -> tuple:
     )
 
 
-@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
+@st.cache_data(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
 def _compute_corr(features: pd.DataFrame) -> pd.DataFrame:
     """Calcule la matrice de correlation des features (cache par dataset)."""
     return features.corr()
 
 
-@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
+@st.cache_data(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
 def _compute_importances(features: pd.DataFrame, labels: dict) -> pd.Series:
     """Calcule la permutation importance (cache par dataset)."""
     clf, *_ = _train_model(features, labels)
@@ -91,7 +91,7 @@ def _compute_importances(features: pd.DataFrame, labels: dict) -> pd.Series:
     return clf.feature_importances(X_imp, y_imp)
 
 
-@st.cache_resource(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
+@st.cache_resource(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
 def _train_model(features: pd.DataFrame, labels: dict):
     """Entraine le classifieur et retourne (model, X_test, y_test, y_proba_test, cv_scores)."""
     from sklearn.pipeline import Pipeline

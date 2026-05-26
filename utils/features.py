@@ -45,7 +45,7 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
     winter_kw = grp.loc[grp["month"].isin([12, 1, 2]), "kw"].sum()
     seasonal_ratio = (summer_kw / winter_kw) if winter_kw > 0 else 1.0
 
-    grp["week"] = grp["ts"].dt.to_period("W")
+    grp["week"] = grp["ts"].dt.tz_convert(None).dt.to_period("W")
     weekly_energy = grp.groupby("week")["kw"].sum() * 0.5
     cv_weekly = (weekly_energy.std() / weekly_energy.mean()) if weekly_energy.mean() > 0 else 0.0
 

@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from config import DEFAULT_TS_PATH, DEFAULT_LBL_PATH, DATA_URL_TS, ROOT_DIR
+from config import DEFAULT_TS_PATH, DEFAULT_LBL_PATH, DATA_URL_TS, ROOT_DIR, MAX_METERS_UPLOAD
 from utils.parser import parse_timeseries, parse_labels
 
 
@@ -59,9 +59,9 @@ def _resolve_ts_path() -> Path | None:
 
 
 @st.cache_data(show_spinner="Chargement du jeu de donnees...")
-def _load_ts_cached(path_str: str, mtime: float, size: int) -> pd.DataFrame:
+def _load_ts_cached(path_str: str, mtime: float, size: int, max_meters: int | None) -> pd.DataFrame:
     """Parse le CSV timeseries depuis le disque (cache invalide si fichier modifie)."""
-    return parse_timeseries(path_str, max_meters=None)
+    return parse_timeseries(path_str, max_meters=max_meters)
 
 
 @st.cache_data(show_spinner="Chargement des labels...")
@@ -90,7 +90,7 @@ def load_default_ts() -> pd.DataFrame | None:
         )
         return None
     mtime, size = _stat(p)
-    return _load_ts_cached(str(p), mtime, size)
+    return _load_ts_cached(str(p), mtime, size, MAX_METERS_UPLOAD)
 
 
 def load_default_labels() -> dict | None:
