@@ -7,16 +7,10 @@ import numpy as np
 class Palette:
     """Palette de couleurs (niveaux de gris uniquement)."""
 
-    RS: str = "#0F172A"
-    RP: str = "#0F172A"
-    RS_soft: str = "#F8FAFC"
-    RP_soft: str = "#F1F5F9"
     LR: str = "#0F172A"
     ARIMA: str = "#475569"
     LSTM: str = "#94A3B8"
-    NAIVE: str = "#CBD5E1"
     REAL: str = "#0F172A"
-    GRID: str = "#F8FAFC"
     BORDER: str = "#E2E8F0"
     TEXT: str = "#0F172A"
     TEXT_MUTED: str = "#64748B"
@@ -29,7 +23,6 @@ class Palette:
 PAL = Palette()
 
 STEPS_PER_DAY = 48
-STEPS_PER_HOUR = 2
 
 CLF_TEST_SIZE = 0.30
 CLF_N_TREES = 300
@@ -46,22 +39,12 @@ LSTM_EPOCHS = 40
 LSTM_LR = 1e-3
 LSTM_BATCH_SIZE = 64
 
-GEN_DEFAULT_N = 10
 GEN_NOISE_STD = 0.15
 GEN_NOISE_RHO = 0.7  # autocorrélation AR(1) entre slots consécutifs
 GEN_CORPUS_N = 300    # courbes par classe dans le corpus de référence built-in
 GEN_CORPUS_DAYS = 14  # jours par courbe dans le corpus
 
 MAX_METERS_UPLOAD = 200
-
-DAY_FR = {
-    "Monday": "Lundi", "Tuesday": "Mardi", "Wednesday": "Mercredi",
-    "Thursday": "Jeudi", "Friday": "Vendredi", "Saturday": "Samedi", "Sunday": "Dimanche",
-}
-DAY_FR_SHORT = {
-    "Monday": "Lun", "Tuesday": "Mar", "Wednesday": "Mer",
-    "Thursday": "Jeu", "Friday": "Ven", "Saturday": "Sam", "Sunday": "Dim",
-}
 
 
 def _make_rp_profile() -> np.ndarray:
