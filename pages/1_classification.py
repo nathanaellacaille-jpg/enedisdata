@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from sklearn.metrics import confusion_matrix, recall_score, make_scorer
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_validate
+from sklearn.metrics import confusion_matrix, recall_score, accuracy_score, f1_score
+from sklearn.model_selection import train_test_split, StratifiedKFold
 
-from config import PAL, CLF_TEST_SIZE, CLF_N_TREES, MAX_METERS_UPLOAD, _make_rp_profile, _make_rs_profile
+from config import PAL, CLF_TEST_SIZE, CLF_N_TREES, CLF_RS_THRESHOLD, MAX_METERS_UPLOAD, _make_rp_profile, _make_rs_profile
 from models.classifier import EnergyClassifier
 from utils.features import extract_features
 from utils.parser import parse_timeseries, parse_labels
@@ -73,9 +73,10 @@ def _predict_all(features: pd.DataFrame, labels: dict) -> tuple:
     clf, *_ = _train_model(features, labels)
     if clf is None:
         return pd.Series(index=features.index, dtype=int), pd.Series(index=features.index, dtype=float)
+    proba = clf.predict_proba(features)
     return (
-        pd.Series(clf.predict(features), index=features.index),
-        pd.Series(clf.predict_proba(features), index=features.index),
+        pd.Series((proba >= CLF_RS_THRESHOLD).astype(int), index=features.index),
+        pd.Series(proba, index=features.index),
     )
 
 
@@ -120,25 +121,27 @@ def _train_model(features: pd.DataFrame, labels: dict):
     clf.fit(X_train, y_train)
     y_proba_test = clf.predict_proba(X_test)
 
-    # Validation croisée stratifiée 5 folds sur la totalité des données labellisées
-    cv_pipe = Pipeline([
-        ("scaler", StandardScaler()),
-        ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1, class_weight="balanced")),
-    ])
+    # Validation croisée stratifiée 5 folds, métriques calculées au seuil CLF_RS_THRESHOLD
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    scoring = {
-        "accuracy": "accuracy",
-        "f1": "f1_weighted",
-        "recall_rs": make_scorer(recall_score, pos_label=1, zero_division=0),
-    }
-    cv_res = cross_validate(cv_pipe, X, y, cv=cv, scoring=scoring)
+    accs, f1s, recs = [], [], []
+    for tr_idx, te_idx in cv.split(X, y):
+        cv_pipe = Pipeline([
+            ("scaler", StandardScaler()),
+            ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1, class_weight="balanced")),
+        ])
+        cv_pipe.fit(X.iloc[tr_idx], y[tr_idx])
+        proba_fold = cv_pipe.predict_proba(X.iloc[te_idx])[:, 1]
+        pred_fold = (proba_fold >= CLF_RS_THRESHOLD).astype(int)
+        accs.append(accuracy_score(y[te_idx], pred_fold))
+        f1s.append(f1_score(y[te_idx], pred_fold, average="weighted"))
+        recs.append(recall_score(y[te_idx], pred_fold, pos_label=1, zero_division=0))
     cv_scores = {
-        "accuracy": float(cv_res["test_accuracy"].mean()),
-        "f1": float(cv_res["test_f1"].mean()),
-        "recall_rs": float(cv_res["test_recall_rs"].mean()),
-        "accuracy_std": float(cv_res["test_accuracy"].std()),
-        "f1_std": float(cv_res["test_f1"].std()),
-        "recall_rs_std": float(cv_res["test_recall_rs"].std()),
+        "accuracy": float(np.mean(accs)),
+        "f1": float(np.mean(f1s)),
+        "recall_rs": float(np.mean(recs)),
+        "accuracy_std": float(np.std(accs)),
+        "f1_std": float(np.std(f1s)),
+        "recall_rs_std": float(np.std(recs)),
     }
     return clf, X_test, y_test, y_proba_test, cv_scores
 
@@ -201,7 +204,7 @@ y_proba_test = None
 cv_scores = None
 if labels is not None:
     clf, X_test, y_test, y_proba_test, cv_scores = _train_model(features, labels)
-y_pred = (y_proba_test >= 0.5).astype(int) if y_proba_test is not None else None
+y_pred = (y_proba_test >= CLF_RS_THRESHOLD).astype(int) if y_proba_test is not None else None
 
 # Predictions sur tout le dataset
 if clf is not None:
@@ -261,7 +264,7 @@ if not proba_series.empty and selected in proba_series.index:
     with col_g:
         st.plotly_chart(fig_gauge, width="stretch")
     with col_info:
-        label_txt = "RS" if proba_rs >= 0.5 else "RP"
+        label_txt = "RS" if proba_rs >= CLF_RS_THRESHOLD else "RP"
         st.metric("Classe predite", label_txt, delta_color="off")
 else:
     st.caption("Chargez des labels pour obtenir la classification.")
