@@ -17,6 +17,10 @@ def _preload(name: str, path: Path, is_pkg: bool = False) -> None:
     car Python ne peut pas resoudre les packages locaux depuis ce contexte.
     En chargeant les fichiers directement avec spec_from_file_location on
     court-circuite entierement le mecanisme d'import defaillant.
+
+    IMPORTANT : on doit aussi setter l'attribut sur le package parent, sinon
+    `from utils.X import Y` echoue avec ImportError sur Python 3.14 strict
+    meme si le module est correctement dans sys.modules.
     """
     if name in sys.modules:
         return
@@ -27,6 +31,12 @@ def _preload(name: str, path: Path, is_pkg: bool = False) -> None:
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
+    # Attache au package parent pour faire fonctionner `from parent.child import X`.
+    if "." in name:
+        parent_name, child_name = name.rsplit(".", 1)
+        parent_mod = sys.modules.get(parent_name)
+        if parent_mod is not None:
+            setattr(parent_mod, child_name, mod)
 
 
 _preload("config",            _root / "config.py")
