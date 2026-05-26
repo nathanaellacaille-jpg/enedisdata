@@ -156,7 +156,7 @@ st.plotly_chart(fig_main, width="stretch")
 
 # ── validation : similarite ──────────────────────────────────────────────────
 
-st.markdown("### Similarite avec les donnees reelles")
+st.markdown("### Qualite de generation")
 
 gen = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
 report = gen.similarity_report(real_df, labels, gen_df, curve_type)
@@ -188,12 +188,13 @@ else:
             height=280,
         )
         st.plotly_chart(fig_a, width="stretch")
-        st.metric("Correlation de forme (Pearson)", f"{report['pearson_profile']:.3f}", delta_color="off")
+        st.metric("Ressemblance de profil", f"{report['pearson_profile'] * 100:.0f} %", delta_color="off")
         if has_upload and report["discriminative_score"] is not None:
+            indiscernabilite = max(0.0, 1.0 - abs(report["discriminative_score"] - 0.5) * 2) * 100
             st.metric(
-                "Score discriminant (1-NN)",
-                f"{report['discriminative_score']:.3f}",
-                delta="ideal : 0.500",
+                "Indiscernabilite",
+                f"{indiscernabilite:.0f} %",
+                delta="ideal : 100 %",
                 delta_color="off",
             )
 
@@ -222,7 +223,7 @@ else:
             height=280,
         )
         st.plotly_chart(fig_b, width="stretch")
-        st.metric("Distance de Wasserstein", f"{report['wasserstein_energy']:.2f} kWh", delta_color="off")
+        st.metric("Ecart energetique moyen", f"{report['wasserstein_energy']:.2f} kWh", delta_color="off")
 
 
 # ── KPIs coherence globale ────────────────────────────────────────────────────
@@ -236,21 +237,10 @@ with k1:
               delta=delta_e, delta_color="off")
 with k2:
     delta_p = f"reel : {report['peak_real']:.2f}" if report["peak_real"] is not None else None
-    st.metric("Pic", f"{report['peak_gen']:.2f} kW",
+    st.metric("Puissance de pointe", f"{report['peak_gen']:.2f} kW",
               delta=delta_p, delta_color="off")
 with k3:
     delta_r = f"reel : {report['we_ratio_real']:.2f}" if report["we_ratio_real"] is not None else None
-    st.metric("Ratio WE / semaine", f"{report['we_ratio_gen']:.2f}",
+    st.metric("Rapport weekend", f"{report['we_ratio_gen']:.2f}",
               delta=delta_r, delta_color="off")
 
-
-# ── export ────────────────────────────────────────────────────────────────────
-
-st.markdown("### Export")
-csv_bytes = gen_df.to_csv(index=False).encode("utf-8")
-st.download_button(
-    "Telecharger le CSV",
-    csv_bytes,
-    file_name=f"courbes_{curve_type}_{n_curves}.csv",
-    mime="text/csv",
-)
