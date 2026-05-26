@@ -65,14 +65,30 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
     absent = (daily < 0.5).values
     max_gap = 0
     cur = 0
+    n_absence_periods = 0
     for v in absent:
         if v:
             cur += 1
             if cur > max_gap:
                 max_gap = cur
         else:
+            if cur >= 3:
+                n_absence_periods += 1
             cur = 0
+    if cur >= 3:
+        n_absence_periods += 1
     max_gap_days = max_gap
+
+    # active_days_ratio : proportion de jours occupés (RS = beaucoup de jours vides)
+    active_days_ratio = float((daily >= 0.5).mean()) if len(daily) > 0 else 0.0
+
+    # seasonal_presence_gap : écart de présence été - hiver dans [-1, 1] (RS = occupation saisonnière marquée)
+    month_map = grp.groupby("date")["month"].first()
+    summer_dates = month_map[month_map.isin([6, 7, 8])].index
+    winter_dates = month_map[month_map.isin([12, 1, 2])].index
+    summer_active = (daily[daily.index.isin(summer_dates)] >= 0.5).mean() if len(summer_dates) > 0 else 0.0
+    winter_active = (daily[daily.index.isin(winter_dates)] >= 0.5).mean() if len(winter_dates) > 0 else 0.0
+    seasonal_presence_gap = float(summer_active - winter_active)
 
     # skewness : asymétrie de la distribution (RS : beaucoup de zéros + pics rares → fortement asymétrique)
     _std = series_kw.std()
@@ -95,6 +111,9 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
         "zero_ratio": zero_ratio,
         "autocorr_lag48": autocorr_lag48,
         "max_gap_days": max_gap_days,
+        "n_absence_periods": n_absence_periods,
+        "active_days_ratio": active_days_ratio,
+        "seasonal_presence_gap": seasonal_presence_gap,
         "skewness": skewness,
         "fourier_amp_1": f1,
         "fourier_amp_2": f2,
