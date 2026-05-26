@@ -1,0 +1,182 @@
+"""Phase 0 — Diagnostic chiffre de la classification RS/RP.
+
+Produit une baseline propre avant toute modification :
+- distribution des labels
+- metriques CV5 (accuracy, F1, rappel/precision RS, AUC)
+- matrice de confusion agregee
+- top erreurs avec leurs features
+- courbe d'apprentissage (sature-t-on ou plus de data aiderait ?)
+
+A relancer apres chaque iteration de Phase 1/2/3 pour mesurer le gain.
+
+Usage : python scripts/phase0_diagnostic.py
+"""
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from sklearn.model_selection import StratifiedKFold, learning_curve
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+from config import CLF_N_TREES, CLF_RS_THRESHOLD, DEFAULT_LBL_PATH, DEFAULT_TS_PATH
+from models.classifier import EnergyClassifier
+from utils.features import extract_features
+from utils.parser import parse_labels, parse_timeseries
+
+
+def main() -> None:
+    """Execute le diagnostic complet."""
+    print("=" * 72)
+    print("PHASE 0 — DIAGNOSTIC CLASSIFICATION RS/RP")
+    print("=" * 72)
+
+    # 1. Chargement
+    print("\n[1/6] Chargement des donnees...")
+    if not DEFAULT_TS_PATH.exists():
+        print(f"  ERREUR : {DEFAULT_TS_PATH} introuvable.")
+        sys.exit(1)
+    df = parse_timeseries(str(DEFAULT_TS_PATH), max_meters=None)
+    labels = parse_labels(str(DEFAULT_LBL_PATH))
+    print(f"  Timeseries : {df['meter_id'].nunique()} compteurs, {len(df):,} points")
+    print(f"  Labels     : {len(labels)} ids")
+
+    # 2. Features
+    print("\n[2/6] Extraction des features...")
+    features = extract_features(df)
+    print(f"  Features : {features.shape[0]} compteurs x {features.shape[1]} colonnes")
+    print(f"  Colonnes : {list(features.columns)}")
+
+    # 3. Intersection
+    common = [mid for mid in features.index if str(mid) in labels]
+    X = features.loc[common]
+    y = np.array([labels[str(mid)] for mid in common])
+    n_rp = int((y == 0).sum())
+    n_rs = int((y == 1).sum())
+    print(f"\n[3/6] Distribution des labels (intersection features x labels = {len(y)})")
+    print(f"  RP : {n_rp} ({n_rp / len(y) * 100:.1f} %)")
+    print(f"  RS : {n_rs} ({n_rs / len(y) * 100:.1f} %)")
+    print(f"  Desequilibre : {max(n_rp, n_rs) / min(n_rp, n_rs):.2f}x")
+
+    # 4. CV5 baseline
+    print("\n[4/6] CV5 baseline (EnergyClassifier actuel, seuil 0.35)...")
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    metrics: dict[str, list[float]] = {
+        "accuracy": [], "f1_weighted": [],
+        "recall_rs": [], "precision_rs": [],
+        "auc": [],
+    }
+    y_true_all: list[int] = []
+    y_pred_all: list[int] = []
+    y_proba_all: list[float] = []
+
+    for tr_idx, te_idx in cv.split(X, y):
+        clf = EnergyClassifier()
+        clf.fit(X.iloc[tr_idx], y[tr_idx])
+        proba = clf.predict_proba(X.iloc[te_idx])
+        pred = (proba >= CLF_RS_THRESHOLD).astype(int)
+
+        metrics["accuracy"].append(accuracy_score(y[te_idx], pred))
+        metrics["f1_weighted"].append(f1_score(y[te_idx], pred, average="weighted"))
+        metrics["recall_rs"].append(recall_score(y[te_idx], pred, pos_label=1, zero_division=0))
+        metrics["precision_rs"].append(precision_score(y[te_idx], pred, pos_label=1, zero_division=0))
+        metrics["auc"].append(roc_auc_score(y[te_idx], proba))
+
+        y_true_all.extend(y[te_idx].tolist())
+        y_pred_all.extend(pred.tolist())
+        y_proba_all.extend(proba.tolist())
+
+    print(f"  {'Metrique':<18s} {'Moyenne':>10s} {'+/- std':>10s}")
+    print(f"  {'-' * 18} {'-' * 10} {'-' * 10}")
+    for name, vals in metrics.items():
+        print(f"  {name:<18s} {np.mean(vals):>10.4f} {np.std(vals):>10.4f}")
+
+    # 5. Matrice de confusion + erreurs
+    print("\n[5/6] Matrice de confusion (CV5 agregee)")
+    cm = confusion_matrix(y_true_all, y_pred_all)
+    print(f"               Pred RP    Pred RS")
+    print(f"  Vrai RP    {cm[0, 0]:8d}   {cm[0, 1]:8d}    (rappel RP : {cm[0, 0] / cm[0].sum():.3f})")
+    print(f"  Vrai RS    {cm[1, 0]:8d}   {cm[1, 1]:8d}    (rappel RS : {cm[1, 1] / cm[1].sum():.3f})")
+
+    preds_df = pd.DataFrame({
+        "meter_id": common,
+        "y_true": y_true_all,
+        "y_pred": y_pred_all,
+        "y_proba": y_proba_all,
+    })
+    errors = preds_df[preds_df["y_true"] != preds_df["y_pred"]]
+    fn = errors[(errors["y_true"] == 1) & (errors["y_pred"] == 0)]  # missed RS
+    fp = errors[(errors["y_true"] == 0) & (errors["y_pred"] == 1)]  # false RS
+    print(f"\n  Total erreurs : {len(errors)} / {len(preds_df)} ({len(errors) / len(preds_df) * 100:.1f} %)")
+    print(f"  Faux negatifs RS (manques)   : {len(fn)}")
+    print(f"  Faux positifs RS (sur-detect): {len(fp)}")
+
+    # Worst confidence errors
+    worst_fn = fn.nsmallest(5, "y_proba")
+    worst_fp = fp.nlargest(5, "y_proba")
+    print(f"\n  Top 5 RS manquees (proba la plus basse) — confiance la plus erronee :")
+    for _, row in worst_fn.iterrows():
+        feat = X.loc[row["meter_id"]]
+        print(f"    {row['meter_id']} : proba={row['y_proba']:.3f} "
+              f"| we/wd={feat['ratio_we_wd']:.2f} zero={feat['zero_ratio']:.2f} "
+              f"gap={feat['max_gap_days']:.0f}j active={feat['active_days_ratio']:.2f}")
+
+    print(f"\n  Top 5 RP classees RS (proba la plus haute) — sur-confiance erronee :")
+    for _, row in worst_fp.iterrows():
+        feat = X.loc[row["meter_id"]]
+        print(f"    {row['meter_id']} : proba={row['y_proba']:.3f} "
+              f"| we/wd={feat['ratio_we_wd']:.2f} zero={feat['zero_ratio']:.2f} "
+              f"gap={feat['max_gap_days']:.0f}j active={feat['active_days_ratio']:.2f}")
+
+    # 6. Learning curve
+    print("\n[6/6] Courbe d'apprentissage (peut prendre 1-2 min)...")
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", RandomForestClassifier(
+            n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1, class_weight="balanced"
+        )),
+    ])
+    train_sizes_abs = [50, 100, 150, 200, 250, 300, 350]
+    train_fracs = [n / len(X) for n in train_sizes_abs if n < len(X) * 0.8]
+    train_n, train_scores, test_scores = learning_curve(
+        pipe, X, y,
+        train_sizes=train_fracs,
+        cv=cv, scoring="f1_weighted", n_jobs=-1, random_state=42,
+    )
+    print(f"  {'N_train':>8s}  {'F1 train':>10s}  {'F1 test':>10s}  {'Ecart':>8s}")
+    print(f"  {'-' * 8}  {'-' * 10}  {'-' * 10}  {'-' * 8}")
+    for n, tr, te in zip(train_n, train_scores.mean(axis=1), test_scores.mean(axis=1)):
+        gap = tr - te
+        print(f"  {int(n):>8d}  {tr:>10.4f}  {te:>10.4f}  {gap:>8.4f}")
+
+    if train_scores.mean(axis=1)[-1] - test_scores.mean(axis=1)[-1] > 0.10:
+        verdict = "OVERFIT : plus de regularisation ou moins de features aiderait"
+    elif test_scores.mean(axis=1)[-1] - test_scores.mean(axis=1)[-3] > 0.02:
+        verdict = "PLUS DE DATA AIDERAIT : la courbe test n'a pas plafonne"
+    else:
+        verdict = "PLATEAU : modele/features sont la limite, pas la quantite de data"
+    print(f"\n  Verdict : {verdict}")
+
+    print("\n" + "=" * 72)
+    print(f"BASELINE A BATTRE : F1 weighted = {np.mean(metrics['f1_weighted']):.4f}, "
+          f"Recall RS = {np.mean(metrics['recall_rs']):.4f}, "
+          f"AUC = {np.mean(metrics['auc']):.4f}")
+    print("=" * 72)
+
+
+if __name__ == "__main__":
+    main()
