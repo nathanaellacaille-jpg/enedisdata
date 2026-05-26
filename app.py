@@ -29,6 +29,7 @@ def _preload(name: str, path: Path, is_pkg: bool = False) -> None:
     spec.loader.exec_module(mod)
 
 
+_preload("config",            _root / "config.py")
 _preload("utils",             _root / "utils/__init__.py",       is_pkg=True)
 _preload("utils.parser",      _root / "utils/parser.py")
 _preload("utils.features",    _root / "utils/features.py")
