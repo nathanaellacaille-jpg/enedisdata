@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from config import STEPS_PER_DAY, GEN_NOISE_STD, GEN_NOISE_RHO, _make_rp_profile, _make_rs_profile
+from config import STEPS_PER_DAY, GEN_NOISE_STD, GEN_NOISE_RHO, GEN_CORPUS_N, GEN_CORPUS_DAYS, _make_rp_profile, _make_rs_profile
 
 
 def _wasserstein_1d(x: np.ndarray, y: np.ndarray, n_q: int = 200) -> float:
@@ -9,6 +9,29 @@ def _wasserstein_1d(x: np.ndarray, y: np.ndarray, n_q: int = 200) -> float:
         return 0.0
     q = np.linspace(0.0, 1.0, n_q)
     return float(np.mean(np.abs(np.quantile(x, q) - np.quantile(y, q))))
+
+
+def _discriminative_score(real_daily: np.ndarray, gen_daily: np.ndarray) -> "float | None":
+    """Score discriminant 1-NN (ideal=0.5 indiscernable, 1.0=totalement separable)."""
+    try:
+        from sklearn.neighbors import KNeighborsClassifier
+        from sklearn.model_selection import cross_val_score
+        n = min(len(real_daily), len(gen_daily), 200)
+        if n < 10:
+            return None
+        rng = np.random.default_rng(42)
+        X_r = real_daily[rng.choice(len(real_daily), n, replace=False)]
+        X_g = gen_daily[rng.choice(len(gen_daily), n, replace=False)]
+        X = np.vstack([X_r, X_g]).astype(np.float32)
+        y = np.array([0] * n + [1] * n)
+        peaks = X.max(axis=1, keepdims=True)
+        X = X / np.where(peaks > 0, peaks, 1.0)
+        clf = KNeighborsClassifier(n_neighbors=1)
+        cv = max(2, min(5, n // 4))
+        scores = cross_val_score(clf, X, y, cv=cv, scoring="accuracy")
+        return float(scores.mean())
+    except Exception:
+        return None
 
 
 class CurveGenerator:
@@ -28,6 +51,11 @@ class CurveGenerator:
         self.noise_std_by_slot = {
             "RS": np.full(STEPS_PER_DAY, GEN_NOISE_STD),
             "RP": np.full(STEPS_PER_DAY, GEN_NOISE_STD),
+        }
+        # Profils journaliers individuels stockés par fit() pour le mode bootstrap
+        self._corpus_daily: dict[str, np.ndarray] = {
+            "RP": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
+            "RS": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
         }
 
     def fit(self, df: pd.DataFrame, labels: dict | None) -> "CurveGenerator":
@@ -150,6 +178,18 @@ class CurveGenerator:
                 GEN_NOISE_STD * rel_pattern.values, 0.0, noise_cap
             )
 
+            # Profils journaliers individuels pour le mode bootstrap (n_jours × 48 kW)
+            dp = (
+                sub[sub["meter_id"].isin(valid)]
+                .pivot_table(
+                    index=["meter_id", "date"], columns="slot", values="kw", aggfunc="mean"
+                )
+                .reindex(columns=range(STEPS_PER_DAY), fill_value=0.0)
+                .dropna()
+                .values.astype(np.float32)
+            )
+            self._corpus_daily[label_name] = dp[dp.max(axis=1) > 0]
+
         return self
 
     def generate(self, n: int, curve_type: str, n_days: int = 7, noise_std: float = GEN_NOISE_STD) -> pd.DataFrame:
@@ -230,6 +270,7 @@ class CurveGenerator:
             "has_real": False,
             "pearson_profile": None,
             "wasserstein_energy": None,
+            "discriminative_score": None,
             "mean_energy_real": None,
             "mean_energy_gen": None,
             "peak_real": None,
@@ -293,12 +334,29 @@ class CurveGenerator:
         we_avg_real = daily.loc[daily["is_we"], "energy"].mean() if daily["is_we"].any() else 0.0
         wd_avg_real = daily.loc[~daily["is_we"], "energy"].mean() if (~daily["is_we"]).any() else 0.0
 
+        real_daily = (
+            sub.pivot_table(
+                index=["meter_id", "date"], columns="slot", values="kw", aggfunc="mean"
+            )
+            .reindex(columns=range(STEPS_PER_DAY), fill_value=0.0)
+            .dropna()
+            .values.astype(np.float32)
+        )
+        gen_daily = (
+            gen_sub.pivot_table(
+                index=["curve_id", "day"], columns="slot", values="kw", aggfunc="mean"
+            )
+            .reindex(columns=range(STEPS_PER_DAY), fill_value=0.0)
+            .dropna()
+            .values.astype(np.float32)
+        )
         pearson = 0.0
         if profile_real.std() > 0 and profile_gen.std() > 0:
             pearson = float(np.corrcoef(profile_real, profile_gen)[0, 1])
 
         report["has_real"] = True
         report["pearson_profile"] = pearson
+        report["discriminative_score"] = _discriminative_score(real_daily, gen_daily)
         report["wasserstein_energy"] = _wasserstein_1d(energy_real, energy_gen)
         report["profile_real"] = profile_real
         report["energy_real"] = energy_real
@@ -318,3 +376,72 @@ class CurveGenerator:
             daily_energy = float(profile.sum() * float(scale) * 0.5)
             stats[name] = {"mean_kwh_day": round(daily_energy, 2), "std": 0.0}
         return stats
+
+    def build_corpus(self, n_per_class: int = GEN_CORPUS_N, n_days: int = GEN_CORPUS_DAYS) -> "tuple[pd.DataFrame, dict]":
+        """Genere un corpus de reference [meter_id, ts, kw] + labels dict."""
+        base_ts = pd.Timestamp("2024-01-01", tz="UTC")
+        parts = []
+        labels: dict[str, int] = {}
+        for cls_idx, ct in enumerate(["RP", "RS"]):
+            gen_df = self.generate(n_per_class, ct, n_days, GEN_NOISE_STD)
+            gen_df = gen_df.copy()
+            gen_df["meter_id"] = ct + "_" + gen_df["curve_id"].map(lambda x: f"{x:04d}")
+            gen_df["ts"] = (
+                base_ts
+                + pd.to_timedelta(gen_df["day"], unit="D")
+                + pd.to_timedelta(gen_df["slot"] * 30, unit="min")
+            )
+            for mid in gen_df["meter_id"].unique():
+                labels[mid] = cls_idx
+            parts.append(gen_df[["meter_id", "ts", "kw"]])
+        df = pd.concat(parts, ignore_index=True)
+        df["kw"] = df["kw"].astype("float32")
+        return df.sort_values(["meter_id", "ts"]).reset_index(drop=True), labels
+
+    def generate_bootstrap(self, n: int, curve_type: str, n_days: int = 7, noise_std: float = GEN_NOISE_STD) -> pd.DataFrame:
+        """Genere n courbes par reechantillonnage depuis les profils journaliers stockes par fit().
+
+        Chaque journee est tiree aleatoirement depuis le corpus de profils reels ou synthetiques,
+        puis rescalee avec une amplitude log-normale et perturbee par bruit AR(1).
+        Bascule sur generate() si le corpus est vide pour le type demande.
+        """
+        noise_ratio = noise_std / max(GEN_NOISE_STD, 1e-9)
+        records = []
+        for i in range(n):
+            ct = ("RS" if i % 2 == 0 else "RP") if curve_type == "mixed" else curve_type
+            corpus = self._corpus_daily.get(ct)
+            if corpus is None or len(corpus) == 0:
+                sub_df = self.generate(1, ct, n_days, noise_std)
+                for _, row in sub_df.iterrows():
+                    records.append({
+                        "curve_id": i, "day": int(row["day"]), "slot": int(row["slot"]),
+                        "kw": float(row["kw"]), "curve_type": ct,
+                    })
+                continue
+            slot_stds = self.noise_std_by_slot[ct] * noise_ratio
+            log_mean = np.log(max(self._scales[ct], 1e-9))
+            scale = float(np.clip(
+                np.exp(np.random.normal(log_mean, self._scale_log_std[ct])),
+                self._scales[ct] * 0.05,
+                self._scales[ct] * 8.0,
+            ))
+            for day in range(n_days):
+                raw_profile = corpus[np.random.randint(len(corpus))]
+                peak = float(raw_profile.max())
+                profile = (raw_profile / peak) if peak > 0 else np.zeros(STEPS_PER_DAY, dtype=np.float32)
+                day_factor = float(np.clip(1.0 + np.random.normal(0, noise_std * 0.3), 0.3, 2.0))
+                ar_noise = np.zeros(STEPS_PER_DAY)
+                ar_noise[0] = np.random.normal(0, float(slot_stds[0]))
+                innov_scale = np.sqrt(1.0 - GEN_NOISE_RHO ** 2)
+                for t in range(1, STEPS_PER_DAY):
+                    ar_noise[t] = GEN_NOISE_RHO * ar_noise[t - 1] + np.random.normal(
+                        0, float(slot_stds[t]) * innov_scale
+                    )
+                for slot in range(STEPS_PER_DAY):
+                    raw = profile[slot] * (1.0 + ar_noise[slot]) * scale * day_factor
+                    records.append({
+                        "curve_id": i, "day": day, "slot": slot,
+                        "kw": float(np.clip(raw, 0.0, scale * 4.0)),
+                        "curve_type": ct,
+                    })
+        return pd.DataFrame(records)
