@@ -20,7 +20,6 @@ sys.path.insert(0, str(ROOT))
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -33,7 +32,7 @@ from sklearn.model_selection import StratifiedKFold, learning_curve
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from config import CLF_N_TREES, CLF_RS_THRESHOLD, DEFAULT_LBL_PATH, DEFAULT_TS_PATH
+from config import DEFAULT_LBL_PATH, DEFAULT_TS_PATH
 from models.classifier import EnergyClassifier
 from utils.features import extract_features
 from utils.parser import parse_labels, parse_timeseries
@@ -73,12 +72,12 @@ def main() -> None:
     print(f"  Desequilibre : {max(n_rp, n_rs) / min(n_rp, n_rs):.2f}x")
 
     # 4. CV5 baseline
-    print("\n[4/6] CV5 baseline (EnergyClassifier actuel, seuil 0.35)...")
+    print("\n[4/6] CV5 baseline (EnergyClassifier actuel, seuil tune par PR curve)...")
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     metrics: dict[str, list[float]] = {
         "accuracy": [], "f1_weighted": [],
         "recall_rs": [], "precision_rs": [],
-        "auc": [],
+        "auc": [], "threshold": [],
     }
     y_true_all: list[int] = []
     y_pred_all: list[int] = []
@@ -88,7 +87,8 @@ def main() -> None:
         clf = EnergyClassifier()
         clf.fit(X.iloc[tr_idx], y[tr_idx])
         proba = clf.predict_proba(X.iloc[te_idx])
-        pred = (proba >= CLF_RS_THRESHOLD).astype(int)
+        pred = (proba >= clf.threshold_).astype(int)
+        metrics["threshold"].append(clf.threshold_)
 
         metrics["accuracy"].append(accuracy_score(y[te_idx], pred))
         metrics["f1_weighted"].append(f1_score(y[te_idx], pred, average="weighted"))
@@ -144,10 +144,15 @@ def main() -> None:
 
     # 6. Learning curve
     print("\n[6/6] Courbe d'apprentissage (peut prendre 1-2 min)...")
+    from sklearn.ensemble import HistGradientBoostingClassifier
     pipe = Pipeline([
         ("scaler", StandardScaler()),
-        ("clf", RandomForestClassifier(
-            n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1, class_weight="balanced"
+        ("clf", HistGradientBoostingClassifier(
+            max_iter=400, learning_rate=0.05, max_depth=6,
+            min_samples_leaf=10, l2_regularization=0.5,
+            class_weight="balanced", random_state=42,
+            early_stopping=True, validation_fraction=0.15,
+            n_iter_no_change=20,
         )),
     ])
     train_sizes_abs = [50, 100, 150, 200, 250, 300, 350]

@@ -54,7 +54,9 @@ Le fichier labels `RES2-6-9-labels.csv` (~9 KB, 500 ids) est tracke directement 
 
 **Classification RS/RP** — `pages/1_classification.py`
 
-Pipeline : extraction de 17 features (energie WE/semaine, ratios temporels jour/nuit/matin/soir, variabilites, harmoniques Fourier, ratio jours actifs, etc.) -> StandardScaler -> RandomForest(300 arbres, class_weight=balanced). Seuil decisionnel `CLF_RS_THRESHOLD=0.35` pour ameliorer le rappel sur la classe RS. Validation croisee 5 folds stratifiee. Importances calculees par permutation.
+Pipeline : extraction de **26 features** (ratio WE/semaine, presence/absence, entropie hebdo, variabilite de l'heure du pic, signatures saisonnieres, 6 harmoniques Fourier, etc.) -> StandardScaler -> **HistGradientBoostingClassifier** (class_weight=balanced, early stopping). Le seuil decisionnel est appris dynamiquement par PR curve sur CV5 interne (max F1) au lieu d'etre hardcode. Validation croisee 5 folds stratifiee + importances par permutation.
+
+Sur 500 compteurs labellises (85.6 % RP / 14.4 % RS) : **F1 weighted 0.932, Recall RS 0.789, AUC 0.959** (CV5).
 
 Vue lineaire (non-onglets) : metriques compteur, courbe de charge, profil moyen vs references RS/RP, facteurs determinants, positionnement parmi tous les compteurs, performance globale + matrice de confusion.
 

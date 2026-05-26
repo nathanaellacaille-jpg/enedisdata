@@ -5,7 +5,7 @@ import streamlit as st
 from sklearn.metrics import confusion_matrix, recall_score, accuracy_score, f1_score
 from sklearn.model_selection import train_test_split, StratifiedKFold
 
-from config import PAL, CLF_TEST_SIZE, CLF_N_TREES, CLF_RS_THRESHOLD, _make_rp_profile, _make_rs_profile
+from config import PAL, CLF_TEST_SIZE, _make_rp_profile, _make_rs_profile
 from models.classifier import EnergyClassifier
 from utils.data_loader import load_default_ts, load_default_labels
 from utils.features import extract_features
@@ -28,6 +28,15 @@ _FEAT_LABELS = {
     "fourier_amp_1": "Periodicite J",
     "fourier_amp_2": "Periodicite J/2",
     "fourier_amp_3": "Periodicite J/3",
+    "fourier_amp_4": "Periodicite J/4",
+    "fourier_amp_5": "Periodicite J/5",
+    "fourier_amp_6": "Periodicite J/6",
+    "weekly_entropy": "Entropie hebdo",
+    "peak_hour_std": "Variabilite heure pic",
+    "dow_consistency": "Coherence jour-semaine",
+    "summer_weekend_boost": "Boost WE ete",
+    "night_amplitude": "Amplitude nuit",
+    "vacation_weeks": "Vacances longues (sem.)",
 }
 
 
@@ -64,7 +73,7 @@ def _predict_all(features: pd.DataFrame, labels: dict) -> tuple:
         return pd.Series(index=features.index, dtype=int), pd.Series(index=features.index, dtype=float)
     proba = clf.predict_proba(features)
     return (
-        pd.Series((proba >= CLF_RS_THRESHOLD).astype(int), index=features.index),
+        pd.Series((proba >= clf.threshold_).astype(int), index=features.index),
         pd.Series(proba, index=features.index),
     )
 
@@ -93,11 +102,7 @@ def _compute_importances(features: pd.DataFrame, labels: dict) -> pd.Series:
 
 @st.cache_resource(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
 def _train_model(features: pd.DataFrame, labels: dict):
-    """Entraine le classifieur et retourne (model, X_test, y_test, y_proba_test, cv_scores)."""
-    from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.ensemble import RandomForestClassifier
-
+    """Entraine EnergyClassifier (HistGBT, threshold tune) et retourne (model, X_test, y_test, y_proba_test, cv_scores)."""
     common = [mid for mid in features.index if str(mid) in labels]
     if len(common) < 4:
         return None, None, None, None, None
@@ -110,20 +115,18 @@ def _train_model(features: pd.DataFrame, labels: dict):
     clf.fit(X_train, y_train)
     y_proba_test = clf.predict_proba(X_test)
 
-    # Validation croisée stratifiée 5 folds, métriques calculées au seuil CLF_RS_THRESHOLD
+    # Validation croisée stratifiée 5 folds : chaque fold reentraine + retune son seuil
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    accs, f1s, recs = [], [], []
+    accs, f1s, recs, thresholds = [], [], [], []
     for tr_idx, te_idx in cv.split(X, y):
-        cv_pipe = Pipeline([
-            ("scaler", StandardScaler()),
-            ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1, class_weight="balanced")),
-        ])
-        cv_pipe.fit(X.iloc[tr_idx], y[tr_idx])
-        proba_fold = cv_pipe.predict_proba(X.iloc[te_idx])[:, 1]
-        pred_fold = (proba_fold >= CLF_RS_THRESHOLD).astype(int)
+        fold_clf = EnergyClassifier()
+        fold_clf.fit(X.iloc[tr_idx], y[tr_idx])
+        proba_fold = fold_clf.predict_proba(X.iloc[te_idx])
+        pred_fold = (proba_fold >= fold_clf.threshold_).astype(int)
         accs.append(accuracy_score(y[te_idx], pred_fold))
         f1s.append(f1_score(y[te_idx], pred_fold, average="weighted"))
         recs.append(recall_score(y[te_idx], pred_fold, pos_label=1, zero_division=0))
+        thresholds.append(fold_clf.threshold_)
     cv_scores = {
         "accuracy": float(np.mean(accs)),
         "f1": float(np.mean(f1s)),
@@ -131,6 +134,7 @@ def _train_model(features: pd.DataFrame, labels: dict):
         "accuracy_std": float(np.std(accs)),
         "f1_std": float(np.std(f1s)),
         "recall_rs_std": float(np.std(recs)),
+        "threshold_mean": float(np.mean(thresholds)),
     }
     return clf, X_test, y_test, y_proba_test, cv_scores
 
@@ -179,7 +183,7 @@ y_proba_test = None
 cv_scores = None
 if labels is not None:
     clf, X_test, y_test, y_proba_test, cv_scores = _train_model(features, labels)
-y_pred = (y_proba_test >= CLF_RS_THRESHOLD).astype(int) if y_proba_test is not None else None
+y_pred = (y_proba_test >= clf.threshold_).astype(int) if (clf is not None and y_proba_test is not None) else None
 
 # Predictions sur tout le dataset
 if clf is not None:
@@ -239,7 +243,8 @@ if not proba_series.empty and selected in proba_series.index:
     with col_g:
         st.plotly_chart(fig_gauge, width="stretch")
     with col_info:
-        label_txt = "RS" if proba_rs >= CLF_RS_THRESHOLD else "RP"
+        threshold = clf.threshold_ if clf is not None else 0.5
+        label_txt = "RS" if proba_rs >= threshold else "RP"
         st.metric("Classe predite", label_txt, delta_color="off")
 else:
     st.caption("Chargez des labels pour obtenir la classification.")

@@ -55,8 +55,7 @@ DATA_URL_TS = os.environ.get(
 STEPS_PER_DAY = 48
 
 CLF_TEST_SIZE = 0.30
-CLF_N_TREES = 300
-CLF_RS_THRESHOLD = 0.35      # seuil abaisse sous 0.5 pour ameliorer le rappel RS
+CLF_N_TREES = 300            # legacy, n'est plus utilise depuis le passage HistGBT
 
 FCST_N_LAGS = 384            # 8 jours de lags (Ridge selectionne j-1..j-8 via L2)
 FCST_N_FOURIER = 3
@@ -118,7 +117,9 @@ Cache `@st.cache_data` keye sur `(path, mtime, size, max_meters)` : invalide si 
 
 ## utils/features.py
 
-17 features par compteur (index = `meter_id`) :
+26 features par compteur (index = `meter_id`). Refonte Phase 1+2 (2026-05-26) :
+ajout de 6 features ciblees sur les "RS occupees" (RS qui ressemblent aux RP)
+et extension Fourier de 3 a 6 harmoniques.
 
 | Famille | Feature | Description |
 |---|---|---|
@@ -127,16 +128,22 @@ Cache `@st.cache_data` keye sur `(path, mtime, size, max_meters)` : invalide si 
 | Presence | `n_absence_periods` | Nombre de periodes d'absence |
 | Presence | `active_days_ratio` | Taux de jours avec consommation |
 | Presence | `seasonal_presence_gap` | Ecart de presence ete vs hiver |
+| Presence | `vacation_weeks` | Plus longue serie de semaines a faible energie |
 | Periodicite | `autocorr_lag48` | Autocorrelation jour-precedent |
 | Temporel | `ratio_we_wd` | Energie weekend / energie semaine |
 | Temporel | `peak_hour_ratio` | Energie 18h-22h / total |
 | Temporel | `night_ratio` | Energie 0h-6h / total |
 | Temporel | `morning_ratio` | Energie 6h-9h / total |
+| Temporel | `peak_hour_std` | Variabilite jour-a-jour de l'heure du pic du soir |
+| Temporel | `night_amplitude` | Amplitude relative kW nuit (veille appareils vs vide reel) |
 | Variabilite | `cv_daily_energy` | CV de l'energie journaliere |
 | Variabilite | `cv_weekly` | CV de l'energie hebdomadaire |
+| Variabilite | `weekly_entropy` | Entropie de Shannon du profil hebdo (normalisee) |
+| Variabilite | `dow_consistency` | Variance inter-semaine du profil par jour de la semaine |
 | Saisonnalite | `seasonal_ratio` | Ratio kW ete / kW hiver |
+| Saisonnalite | `summer_weekend_boost` | Ratio kW WE ete / WE hiver |
 | Distribution | `skewness` | Asymetrie de la distribution kW |
-| Fourier | `fourier_amp_1/2/3` | Amplitudes des 3 premieres harmoniques journalieres |
+| Fourier | `fourier_amp_1/2/3/4/5/6` | Amplitudes des 6 premieres harmoniques journalieres |
 
 ## utils/metrics.py
 
@@ -149,16 +156,30 @@ def compute_metrics(y_true, y_pred) -> dict:
 
 ```python
 class EnergyClassifier:
-    """Pipeline StandardScaler -> RandomForestClassifier (0=RP, 1=RS)."""
+    """Pipeline StandardScaler -> HistGradientBoostingClassifier (0=RP, 1=RS).
+
+    Calcule un seuil decisionnel optimal sur le train via PR curve (max F1),
+    expose via self.threshold_ apres fit.
+    """
 
     def fit(self, X, y) -> "EnergyClassifier"
-    def predict(self, X) -> np.ndarray             # seuil 0.5 par defaut (sklearn)
+    def predict(self, X) -> np.ndarray             # seuil dynamique self.threshold_
     def predict_proba(self, X) -> np.ndarray       # probabilite de la classe RS
     def feature_importances(self, X, y) -> pd.Series  # permutation importance, scoring f1_weighted
     def save(self, path) / load(self, path)
 ```
 
-Le seuil decisionnel applique en page (`CLF_RS_THRESHOLD=0.35`) est plus bas que 0.5 pour ameliorer le rappel sur la classe RS minoritaire. RandomForest entraine avec `class_weight="balanced"`.
+HistGradientBoostingClassifier configure : `max_iter=400, learning_rate=0.05, max_depth=6, min_samples_leaf=10, l2_regularization=0.5, class_weight="balanced", early_stopping=True`. Choix sklearn natif vs LightGBM/XGBoost pour eviter une dependance supplementaire sur Python 3.14 / Streamlit Cloud.
+
+Le seuil decisionnel est appris par CV5 interne sur le train (PR curve, max F1) et stocke dans `self.threshold_`. Plus de constante `CLF_RS_THRESHOLD` hardcodee. En pratique le seuil tourne autour de 0.5.
+
+**Performance baseline (CV5, 500 compteurs)** :
+| Metrique | Valeur |
+|---|---|
+| F1 weighted | 0.932 |
+| Recall RS | 0.789 |
+| Precision RS | 0.767 |
+| AUC | 0.959 |
 
 ## models/forecaster.py
 

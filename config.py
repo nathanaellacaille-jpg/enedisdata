@@ -43,8 +43,7 @@ PAL = Palette()
 STEPS_PER_DAY = 48
 
 CLF_TEST_SIZE = 0.30
-CLF_N_TREES = 300
-CLF_RS_THRESHOLD = 0.35  # seuil de decision RS abaisse sous 0.5 pour ameliorer le rappel
+CLF_N_TREES = 300  # legacy : utilise par les anciens snapshots, plus reference dans le code actuel
 
 FCST_N_LAGS = 384  # 8 jours de lags : Ridge sélectionne j-1..j-8 via régularisation L2
 FCST_N_FOURIER = 3

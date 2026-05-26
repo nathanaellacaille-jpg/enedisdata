@@ -97,7 +97,58 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
     # Profil moyen sur 48 slots
     grp["slot"] = (grp["ts"].dt.hour * 2 + grp["ts"].dt.minute // 30)
     mean_profile = grp.groupby("slot")["kw"].mean().reindex(range(STEPS_PER_DAY), fill_value=0.0).values
-    f1, f2, f3 = _fourier_amplitudes(mean_profile, 3)
+    fourier_amps = _fourier_amplitudes(mean_profile, 6)  # 6 harmoniques (audit reco #8)
+
+    # === Features Phase 1+2 — discrimination RS "occupees" vs RP ===
+
+    # weekly_entropy : entropie de Shannon du profil hebdomadaire (RS = patterns plus aleatoires)
+    dow_energy = grp.groupby("dayofweek")["kw"].sum()
+    if dow_energy.sum() > 0:
+        p = (dow_energy / dow_energy.sum()).values
+        p = p[p > 0]
+        weekly_entropy = float(-(p * np.log2(p)).sum() / np.log2(7))  # normalisee [0,1]
+    else:
+        weekly_entropy = 0.0
+
+    # peak_hour_std : variabilite jour-a-jour de l'heure du pic du soir (RP=regulier, RS=erratique)
+    evening = grp[(grp["hour"] >= 17) & (grp["hour"] < 23)].copy()
+    if len(evening) > 0:
+        evening_peak_per_day = evening.loc[evening.groupby("date")["kw"].idxmax()][["date", "hour"]]
+        peak_hour_std = float(evening_peak_per_day["hour"].std()) if len(evening_peak_per_day) > 1 else 0.0
+    else:
+        peak_hour_std = 0.0
+
+    # dow_consistency : variance inter-semaine du profil par jour de la semaine
+    grp["slot_dow"] = grp["dayofweek"] * 48 + grp["slot"]
+    pivot = grp.pivot_table(index="week", columns="slot_dow", values="kw", aggfunc="mean")
+    dow_consistency = float(pivot.std(axis=0).mean()) if not pivot.empty else 0.0
+
+    # summer_weekend_boost : ratio kW WE ete / WE hiver (RS = forte sur-conso WE ete)
+    summer_we = grp.loc[grp["month"].isin([6, 7, 8]) & (grp["dayofweek"] >= 5), "kw"].mean()
+    winter_we = grp.loc[grp["month"].isin([12, 1, 2]) & (grp["dayofweek"] >= 5), "kw"].mean()
+    if pd.notna(summer_we) and pd.notna(winter_we) and winter_we > 0.01:
+        summer_weekend_boost = float(summer_we / winter_we)
+    else:
+        summer_weekend_boost = 1.0
+
+    # night_amplitude : amplitude relative kW nuit (RP = veille appareils stable, RS = vraiment 0)
+    night_kw = grp.loc[night_mask, "kw"]
+    if len(night_kw) > 0 and night_kw.max() > 0:
+        night_amplitude = float((night_kw.max() - night_kw.min()) / (night_kw.mean() + 1e-6))
+    else:
+        night_amplitude = 0.0
+
+    # vacation_weeks : nb de semaines consecutives a faible energie (RS = vacances longues)
+    weekly_low = (weekly_energy < weekly_energy.median() * 0.3).values
+    cur_run = 0
+    max_run = 0
+    for v in weekly_low:
+        if v:
+            cur_run += 1
+            max_run = max(max_run, cur_run)
+        else:
+            cur_run = 0
+    vacation_weeks = float(max_run)
 
     return {
         "meter_id": meter_id,
@@ -115,9 +166,18 @@ def _features_for_meter(meter_id: str, grp: pd.DataFrame) -> dict:
         "active_days_ratio": active_days_ratio,
         "seasonal_presence_gap": seasonal_presence_gap,
         "skewness": skewness,
-        "fourier_amp_1": f1,
-        "fourier_amp_2": f2,
-        "fourier_amp_3": f3,
+        "fourier_amp_1": fourier_amps[0],
+        "fourier_amp_2": fourier_amps[1],
+        "fourier_amp_3": fourier_amps[2],
+        "fourier_amp_4": fourier_amps[3],
+        "fourier_amp_5": fourier_amps[4],
+        "fourier_amp_6": fourier_amps[5],
+        "weekly_entropy": weekly_entropy,
+        "peak_hour_std": peak_hour_std,
+        "dow_consistency": dow_consistency,
+        "summer_weekend_boost": summer_weekend_boost,
+        "night_amplitude": night_amplitude,
+        "vacation_weeks": vacation_weeks,
     }
 
 
