@@ -49,6 +49,8 @@ LSTM_BATCH_SIZE = 64
 GEN_DEFAULT_N = 10
 GEN_NOISE_STD = 0.15
 GEN_NOISE_RHO = 0.7  # autocorrélation AR(1) entre slots consécutifs
+GEN_CORPUS_N = 300    # courbes par classe dans le corpus de référence built-in
+GEN_CORPUS_DAYS = 14  # jours par courbe dans le corpus
 
 MAX_METERS_UPLOAD = 200
 

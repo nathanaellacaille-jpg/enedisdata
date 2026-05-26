@@ -7,6 +7,7 @@ import streamlit as st
 from config import PAL, GEN_DEFAULT_N, GEN_NOISE_STD, MAX_METERS_UPLOAD, STEPS_PER_DAY
 from models.generator import CurveGenerator
 from utils.parser import parse_timeseries, parse_labels
+from utils.corpus import load_builtin_corpus
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -30,10 +31,13 @@ def _plotly_base() -> dict:
 
 @st.cache_resource
 def _fit_generator(ts_key: str, lbl_key: str, ts_bytes: bytes | None, lbl_bytes: bytes | None) -> CurveGenerator:
-    """Cree et entraine le generateur (cache sur cles d'upload)."""
+    """Calibre le generateur — corpus built-in si aucun upload."""
     gen = CurveGenerator()
-    df = parse_timeseries(io.BytesIO(ts_bytes), max_meters=MAX_METERS_UPLOAD) if ts_bytes else None
-    labels = parse_labels(io.BytesIO(lbl_bytes)) if lbl_bytes else None
+    if ts_bytes and lbl_bytes:
+        df = parse_timeseries(io.BytesIO(ts_bytes), max_meters=MAX_METERS_UPLOAD)
+        labels = parse_labels(io.BytesIO(lbl_bytes))
+    else:
+        df, labels = load_builtin_corpus()
     gen.fit(df, labels)
     return gen
 
@@ -52,9 +56,11 @@ def _load_labels_dict(lbl_bytes: bytes, lbl_key: str) -> dict:
 
 @st.cache_data
 def _generate(ts_key: str, lbl_key: str, n: int, curve_type: str, n_days: int,
-              ts_bytes: bytes | None, lbl_bytes: bytes | None) -> pd.DataFrame:
-    """Genere n courbes (cache sur tous les inputs)."""
+              ts_bytes: bytes | None, lbl_bytes: bytes | None, mode: str = "parametric") -> pd.DataFrame:
+    """Genere n courbes en mode parametrique ou reechantillonnage."""
     gen = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
+    if mode == "bootstrap":
+        return gen.generate_bootstrap(n, curve_type, n_days, GEN_NOISE_STD)
     return gen.generate(n, curve_type, n_days, GEN_NOISE_STD)
 
 
@@ -91,27 +97,32 @@ lbl_bytes = st.session_state.get("_gen_lbl_bytes")
 ts_key = st.session_state.get("_gen_ts_file_name", "none")
 lbl_key = st.session_state.get("_gen_lbl_file_name", "none")
 
-calibrated = ts_bytes is not None and lbl_bytes is not None
-if calibrated:
+has_upload = ts_bytes is not None and lbl_bytes is not None
+corpus_df, corpus_labels = load_builtin_corpus()
+
+if has_upload:
     real_df = _load_real(ts_bytes, ts_key)
     labels = _load_labels_dict(lbl_bytes, lbl_key)
     st.caption(f"Calibre sur {real_df['meter_id'].nunique()} compteurs reels — {len(real_df):,} points")
 else:
-    real_df = None
-    labels = None
-    st.caption("Sans calibration : profils de reference theoriques. Charger les deux CSV pour activer la validation.")
+    real_df = corpus_df
+    labels = corpus_labels
+    st.caption(f"Corpus de reference — {corpus_df['meter_id'].nunique()} courbes synthetiques")
 
 
 # ── controles ─────────────────────────────────────────────────────────────────
 
-col_ctrl_1, col_ctrl_2 = st.columns([1, 3])
+col_ctrl_1, col_ctrl_2, col_ctrl_3 = st.columns([1, 3, 2])
 with col_ctrl_1:
     curve_type = st.radio("Type", ["RS", "RP"], horizontal=True, key="gen_type")
 with col_ctrl_2:
     n_curves = st.slider("Courbes generees", 1, 50, GEN_DEFAULT_N, key="gen_n")
+with col_ctrl_3:
+    gen_mode = st.radio("Mode", ["Parametrique", "Reechantillonnage"], horizontal=True, key="gen_mode")
 
 N_DAYS = 7
-gen_df = _generate(ts_key, lbl_key, n_curves, curve_type, N_DAYS, ts_bytes, lbl_bytes)
+mode = "bootstrap" if gen_mode == "Reechantillonnage" else "parametric"
+gen_df = _generate(ts_key, lbl_key, n_curves, curve_type, N_DAYS, ts_bytes, lbl_bytes, mode)
 
 
 # ── graphique principal : N courbes sur 7 jours ──────────────────────────────
@@ -158,7 +169,7 @@ gen = _fit_generator(ts_key, lbl_key, ts_bytes, lbl_bytes)
 report = gen.similarity_report(real_df, labels, gen_df, curve_type)
 
 if not report["has_real"]:
-    st.caption("Validation indisponible : charger les CSV timeseries et labels dans la sidebar.")
+    st.caption("Validation indisponible.")
 else:
     val_a, val_b = st.columns(2)
 
@@ -185,6 +196,13 @@ else:
         )
         st.plotly_chart(fig_a, width="stretch")
         st.metric("Correlation de forme (Pearson)", f"{report['pearson_profile']:.3f}", delta_color="off")
+        if has_upload and report["discriminative_score"] is not None:
+            st.metric(
+                "Score discriminant (1-NN)",
+                f"{report['discriminative_score']:.3f}",
+                delta="ideal : 0.500",
+                delta_color="off",
+            )
 
     with val_b:
         e_real = report["energy_real"]
