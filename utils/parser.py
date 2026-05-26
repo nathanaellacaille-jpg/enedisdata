@@ -60,6 +60,8 @@ def parse_timeseries(file, max_meters: int | None = MAX_METERS_UPLOAD) -> pd.Dat
     df = df.dropna(subset=["ts"])
     # Valeurs source en Wh/demi-heure → conversion en kW : Wh / 0.5 h / 1000 = Wh / 500
     df["kw"] = (pd.to_numeric(df["kw"], errors="coerce").fillna(0.0) / 500.0).astype("float32")
+    # meter_id en categorical : ~1 B/ligne au lieu de ~60 B (str object). Gain RAM ~60x.
+    df["meter_id"] = df["meter_id"].astype("category")
     df = df[["meter_id", "ts", "kw"]].sort_values(["meter_id", "ts"]).reset_index(drop=True)
     return df
 
