@@ -312,17 +312,18 @@ if clf is not None and not meter_feat.empty:
         x=slots, y=rs_ref, mode="lines", name="Ref residence secondaire (RS)",
         line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot"),
     ))
-    fig_radar.update_layout(
+    _radar_layout = {
         **_plotly_base(),
-        margin=dict(l=16, r=16, t=32, b=16),
-        title="Profil de consommation vs references",
-        xaxis=dict(
+        "margin": dict(l=16, r=16, t=32, b=16),
+        "title": "Profil de consommation vs references",
+        "yaxis_title": "Puissance (normalisee)",
+        "xaxis": dict(
             gridcolor="#F1F5F9", linecolor=PAL.BORDER,
             tickfont=dict(size=11, color=PAL.TEXT_MUTED),
             tickvals=tick_vals, ticktext=tick_text,
         ),
-        yaxis_title="Puissance (normalisee)",
-    )
+    }
+    fig_radar.update_layout(**_radar_layout)
     st.plotly_chart(fig_radar, width="stretch")
 
     st.markdown("---")
