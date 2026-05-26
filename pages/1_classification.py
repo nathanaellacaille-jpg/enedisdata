@@ -10,6 +10,23 @@ from models.classifier import EnergyClassifier
 from utils.features import extract_features
 from utils.parser import parse_timeseries, parse_labels
 
+_FEAT_LABELS = {
+    "zero_ratio": "Taux d'absence",
+    "ratio_we_wd": "Ratio WE / semaine",
+    "max_gap_days": "Max jours absents",
+    "autocorr_lag48": "Autocorr. jour precedent",
+    "peak_hour_ratio": "Pic soir (18h-22h)",
+    "night_ratio": "Conso nuit",
+    "morning_ratio": "Conso matin",
+    "cv_daily_energy": "Variabilite quotidienne",
+    "cv_weekly": "Variabilite hebdo",
+    "seasonal_ratio": "Ratio ete / hiver",
+    "skewness": "Asymetrie",
+    "fourier_amp_1": "Periodicite J",
+    "fourier_amp_2": "Periodicite J/2",
+    "fourier_amp_3": "Periodicite J/3",
+}
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -215,7 +232,7 @@ with tab1:
                 "steps": [
                     {"range": [0, 33], "color": "#F8FAFC"},
                     {"range": [33, 66], "color": "#E2E8F0"},
-                    {"range": [66, 100], "color": PAL.TEXT},
+                    {"range": [66, 100], "color": "#334155"},
                 ],
                 "borderwidth": 0,
                 "bgcolor": "white",
@@ -241,9 +258,8 @@ with tab2:
     if len(features) < 2:
         st.caption("Donnees insuffisantes pour la vue d'ensemble.")
     else:
-        # Scatter features
-        col_x = st.selectbox("Axe X", options=list(features.columns), index=0, key="scatter_x")
-        col_y = st.selectbox("Axe Y", options=list(features.columns), index=1, key="scatter_y")
+        # Axes fixes sur les deux features les plus discriminantes RS/RP
+        col_x, col_y = "zero_ratio", "ratio_we_wd"
 
         if clf is not None and not pred_series.empty:
             colors = [PAL.MULTI[0] if p == 1 else PAL.MULTI[4] for p in pred_series.reindex(features.index, fill_value=0)]
@@ -260,7 +276,12 @@ with tab2:
             text=[f"{mid}<br>{lbl}" for mid, lbl in zip(features.index, labels_txt)],
             hovertemplate="%{text}<br>X=%{x:.3f}<br>Y=%{y:.3f}<extra></extra>",
         ))
-        fig2.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), xaxis_title=col_x, yaxis_title=col_y)
+        fig2.update_layout(
+            **_plotly_base(),
+            margin=dict(l=16, r=16, t=32, b=16),
+            xaxis_title=_FEAT_LABELS.get(col_x, col_x),
+            yaxis_title=_FEAT_LABELS.get(col_y, col_y),
+        )
         st.plotly_chart(fig2, width="stretch")
 
         # Distribution predictions
@@ -309,12 +330,12 @@ with tab3:
 
         fig_imp = go.Figure(go.Bar(
             x=top5.values[::-1],
-            y=top5.index[::-1],
+            y=[_FEAT_LABELS.get(f, f) for f in top5.index[::-1]],
             orientation="h",
             marker_color=PAL.MULTI[0],
             width=0.5,
         ))
-        fig_imp.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Top 5 features", xaxis_title="Importance")
+        fig_imp.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Facteurs les plus determinants", xaxis_title="Importance")
         st.plotly_chart(fig_imp, width="stretch")
 
         # Radar vs profil de reference
@@ -328,24 +349,30 @@ with tab3:
 
         slots = list(range(48))
         fig_radar = go.Figure()
+        tick_vals = list(range(0, 48, 4))
+        tick_text = [f"{h}h" for h in range(0, 24, 2)]
         fig_radar.add_trace(go.Scatter(
             x=slots, y=mp, mode="lines", name="Compteur",
-            line=dict(color=PAL.REAL, width=1.5),
+            line=dict(color=PAL.REAL, width=2.5),
         ))
         fig_radar.add_trace(go.Scatter(
-            x=slots, y=rp_ref, mode="lines", name="Ref RP",
+            x=slots, y=rp_ref, mode="lines", name="Ref residence principale (RP)",
             line=dict(color=PAL.ARIMA, width=1.5, dash="dash"),
         ))
         fig_radar.add_trace(go.Scatter(
-            x=slots, y=rs_ref, mode="lines", name="Ref RS",
-            line=dict(color=PAL.LSTM, width=1.5, dash="dot"),
+            x=slots, y=rs_ref, mode="lines", name="Ref residence secondaire (RS)",
+            line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot"),
         ))
         fig_radar.update_layout(
             **_plotly_base(),
             margin=dict(l=16, r=16, t=32, b=16),
-            title="Profil moyen vs references",
-            xaxis_title="Slot (30 min)",
-            yaxis_title="Puissance normalisee",
+            title="Profil de consommation vs references",
+            xaxis=dict(
+                gridcolor="#F1F5F9", linecolor=PAL.BORDER,
+                tickfont=dict(size=11, color=PAL.TEXT_MUTED),
+                tickvals=tick_vals, ticktext=tick_text,
+            ),
+            yaxis_title="Puissance (normalisee)",
         )
         st.plotly_chart(fig_radar, width="stretch")
 
@@ -358,19 +385,19 @@ with tab4:
             st.markdown("**Performances globales**")
             c1, c2, c3 = st.columns(3)
             c1.metric(
-                "Accuracy",
+                "Precision globale",
                 f"{cv_scores['accuracy']:.2%}",
                 f"± {cv_scores['accuracy_std']:.2%}",
                 delta_color="off",
             )
             c2.metric(
-                "F1",
-                f"{cv_scores['f1']:.3f}",
-                f"± {cv_scores['f1_std']:.3f}",
+                "Equilibre RS / RP",
+                f"{cv_scores['f1']:.2%}",
+                f"± {cv_scores['f1_std']:.2%}",
                 delta_color="off",
             )
             c3.metric(
-                "Recall RS",
+                "Detection residences secondaires",
                 f"{cv_scores['recall_rs']:.2%}",
                 f"± {cv_scores['recall_rs_std']:.2%}",
                 delta_color="off",
