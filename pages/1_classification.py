@@ -67,6 +67,40 @@ def _compute_features(df: pd.DataFrame) -> pd.DataFrame:
     return extract_features(df)
 
 
+@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
+def _predict_all(features: pd.DataFrame, labels: dict) -> tuple:
+    """Predit classes et probabilites pour tous les compteurs (cache par dataset)."""
+    clf, *_ = _train_model(features, labels)
+    if clf is None:
+        return pd.Series(index=features.index, dtype=int), pd.Series(index=features.index, dtype=float)
+    return (
+        pd.Series(clf.predict(features), index=features.index),
+        pd.Series(clf.predict_proba(features), index=features.index),
+    )
+
+
+@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
+def _compute_corr(features: pd.DataFrame) -> pd.DataFrame:
+    """Calcule la matrice de correlation des features (cache par dataset)."""
+    return features.corr()
+
+
+@st.cache_data(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
+def _compute_importances(features: pd.DataFrame, labels: dict) -> pd.Series:
+    """Calcule la permutation importance (cache par dataset)."""
+    clf, *_ = _train_model(features, labels)
+    if clf is None:
+        return pd.Series(dtype=float)
+    common = [mid for mid in features.index if str(mid) in labels]
+    if len(common) >= 2:
+        X_imp = features.loc[common]
+        y_imp = np.array([labels[str(mid)] for mid in common])
+    else:
+        X_imp = features
+        y_imp = pd.Series(index=features.index, dtype=int).fillna(0).values.astype(int)
+    return clf.feature_importances(X_imp, y_imp)
+
+
 @st.cache_resource(hash_funcs={pd.DataFrame: lambda df: df.to_json(date_format='iso')})
 def _train_model(features: pd.DataFrame, labels: dict):
     """Entraine le classifieur et retourne (model, X_test, y_test, y_proba_test, cv_scores)."""
@@ -171,10 +205,7 @@ y_pred = (y_proba_test >= 0.5).astype(int) if y_proba_test is not None else None
 
 # Predictions sur tout le dataset
 if clf is not None:
-    all_pred = clf.predict(features)
-    all_proba = clf.predict_proba(features)
-    pred_series = pd.Series(all_pred, index=features.index)
-    proba_series = pd.Series(all_proba, index=features.index)
+    pred_series, proba_series = _predict_all(features, labels)
 else:
     pred_series = pd.Series(index=features.index, dtype=int)
     proba_series = pd.Series(index=features.index, dtype=float)
@@ -297,7 +328,7 @@ with tab2:
             st.plotly_chart(fig_dist, width="stretch")
 
         # Heatmap correlation
-        corr = features.corr()
+        corr = _compute_corr(features)
         fig_corr = go.Figure(go.Heatmap(
             z=corr.values,
             x=list(corr.columns),
@@ -313,19 +344,7 @@ with tab3:
     if clf is None or meter_feat.empty:
         st.caption("Modele non disponible. Chargez des labels.")
     else:
-        # Labels reels si disponibles, sinon labels predits
-        if labels is not None:
-            common_idx = [mid for mid in features.index if str(mid) in labels]
-            if len(common_idx) >= 2:
-                X_imp = features.loc[common_idx]
-                y_imp = np.array([labels[str(mid)] for mid in common_idx])
-            else:
-                X_imp = features
-                y_imp = pred_series.reindex(features.index).fillna(0).values.astype(int)
-        else:
-            X_imp = features
-            y_imp = pred_series.reindex(features.index).fillna(0).values.astype(int)
-        importances = clf.feature_importances(X_imp, y_imp)
+        importances = _compute_importances(features, labels)
         top5 = importances.head(5)
 
         fig_imp = go.Figure(go.Bar(
