@@ -280,7 +280,7 @@ fig = go.Figure()
 fig.add_trace(go.Scatter(
     x=meter_df["ts"], y=meter_df["kw"],
     mode="lines", name="Puissance (kW)",
-    line=dict(color=PAL.REAL, width=1.5),
+    line=dict(color=PAL.ACCENT[0], width=1.5),
 ))
 fig.update_layout(
     **_plotly_base(),
@@ -340,7 +340,7 @@ if clf is not None and not meter_feat.empty:
         x=top5.values[::-1],
         y=[_FEAT_LABELS.get(f, f) for f in top5.index[::-1]],
         orientation="h",
-        marker_color=PAL.MULTI[0],
+        marker_color=PAL.ACCENT[0],
         width=0.5,
     ))
     fig_imp.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Facteurs les plus determinants", xaxis_title="Importance")
@@ -353,7 +353,7 @@ if clf is not None and not pred_series.empty and len(features) >= 2:
 
     col_x, col_y = "zero_ratio", "ratio_we_wd"
     preds = pred_series.reindex(features.index, fill_value=0)
-    colors = [PAL.MULTI[0] if p == 1 else PAL.MULTI[4] for p in preds]
+    colors = [PAL.ACCENT[2] if p == 1 else PAL.ACCENT[1] for p in preds]
     labels_txt = ["RS" if p == 1 else "RP" for p in preds]
 
     fig2 = go.Figure()
