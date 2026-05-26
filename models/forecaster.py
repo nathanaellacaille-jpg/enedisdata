@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 from sklearn.linear_model import RidgeCV
 from config import (
     FCST_N_LAGS, FCST_N_FOURIER, FCST_ARIMA_ORDER,
@@ -68,15 +67,6 @@ class RidgeForecaster:
             window[-1] = y_hat
         return np.array(preds)
 
-    def coef_series(self) -> pd.Series:
-        """Coefficients du modele Ridge."""
-        lag_names = [f"lag_{i+1}" for i in range(self.n_lags)]
-        fourier_names = []
-        for k in range(1, self.n_fourier + 1):
-            fourier_names += [f"sin_{k}", f"cos_{k}"]
-        names = lag_names + fourier_names
-        return pd.Series(self._model.coef_, index=names)
-
 
 class ARIMAForecaster:
     """Modele ARIMA via statsmodels."""
@@ -105,12 +95,6 @@ class ARIMAForecaster:
         """Prevision h pas en avant."""
         forecast = self._result.forecast(steps=h)
         return np.asarray(forecast)
-
-    def summary(self) -> str:
-        """Resume du modele ARIMA."""
-        if self._result is None:
-            return "Modele non entraine."
-        return str(self._result.summary())
 
 
 class LSTMForecaster:
