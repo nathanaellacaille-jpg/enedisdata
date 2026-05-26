@@ -3,9 +3,18 @@ from pathlib import Path
 from typing import List
 import numpy as np
 
+import os
+
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_TS_PATH = ROOT_DIR / "RES2-6-9.csv"
 DEFAULT_LBL_PATH = ROOT_DIR / "RES2-6-9-labels.csv"
+
+# URL de fallback : telechargee si DEFAULT_TS_PATH absent (Streamlit Cloud).
+# Surchargeable via variable d'environnement / secret Streamlit ENEDIS_TS_URL.
+DATA_URL_TS = os.environ.get(
+    "ENEDIS_TS_URL",
+    "https://github.com/nathanaellacaille-jpg/enedisdata/releases/download/data-v1/RES2-6-9.csv",
+)
 
 
 @dataclass(frozen=True)
