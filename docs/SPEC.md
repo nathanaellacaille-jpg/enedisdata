@@ -156,30 +156,41 @@ def compute_metrics(y_true, y_pred) -> dict:
 
 ```python
 class EnergyClassifier:
-    """Pipeline StandardScaler -> HistGradientBoostingClassifier (0=RP, 1=RS).
+    """Pipeline StandardScaler -> StackingClassifier(HistGBT + RF + LogReg)
+    avec meta-learner LogisticRegression.
 
-    Calcule un seuil decisionnel optimal sur le train via PR curve (max F1),
+    Le seuil decisionnel optimal est appris sur le train via PR curve (max F1),
     expose via self.threshold_ apres fit.
     """
 
     def fit(self, X, y) -> "EnergyClassifier"
     def predict(self, X) -> np.ndarray             # seuil dynamique self.threshold_
     def predict_proba(self, X) -> np.ndarray       # probabilite de la classe RS
-    def feature_importances(self, X, y) -> pd.Series  # permutation importance, scoring f1_weighted
+    def feature_importances(self, X, y) -> pd.Series  # permutation importance, f1_weighted
     def save(self, path) / load(self, path)
 ```
 
-HistGradientBoostingClassifier configure : `max_iter=400, learning_rate=0.05, max_depth=6, min_samples_leaf=10, l2_regularization=0.5, class_weight="balanced", early_stopping=True`. Choix sklearn natif vs LightGBM/XGBoost pour eviter une dependance supplementaire sur Python 3.14 / Streamlit Cloud.
+**Architecture Phase 3** (2026-05-26) :
+- Base learners (entrees du stacking) :
+  - HistGBT : params trouves par GridSearchCV (`max_iter=400, learning_rate=0.08, max_depth=4, min_samples_leaf=5, l2_regularization=1.0`)
+  - RandomForest : `n_estimators=400, max_depth=10, min_samples_leaf=5`
+  - LogisticRegression : `C=1.0, max_iter=1000`
+  - Tous : `class_weight="balanced"`, `random_state=42`
+- Meta-learner : LogisticRegression sur les probas out-of-fold (CV5 interne)
+- Le `StackingClassifier` de sklearn gere la CV interne (cv=5) pour generer les meta-features sans leakage.
 
-Le seuil decisionnel est appris par CV5 interne sur le train (PR curve, max F1) et stocke dans `self.threshold_`. Plus de constante `CLF_RS_THRESHOLD` hardcodee. En pratique le seuil tourne autour de 0.5.
+Le seuil decisionnel monte autour de 0.71 (probas du stacking ecrasees vers le haut par le meta LogReg + class_weight). Plus de constante `CLF_RS_THRESHOLD` hardcodee.
 
-**Performance baseline (CV5, 500 compteurs)** :
-| Metrique | Valeur |
-|---|---|
-| F1 weighted | 0.932 |
-| Recall RS | 0.789 |
-| Precision RS | 0.767 |
-| AUC | 0.959 |
+**Performance baseline (CV5, 500 compteurs)** — progression dans le temps :
+| Metrique | RF baseline (Phase 0) | HistGBT + features (Phase 1+2) | Stacking + grid (Phase 3) |
+|---|---|---|---|
+| F1 weighted | 0.908 | 0.932 | **0.938** |
+| Recall RS | 0.581 | 0.789 | **0.832** |
+| Precision RS | 0.775 | 0.767 | 0.771 |
+| AUC | 0.912 | 0.959 | **0.969** |
+| RS manquees | 30/72 | 15/72 | **12/72** |
+
+Plafond actuel : les 12 RS encore manquees ont `ratio_we_wd ~1.0`, `active=1.0`, `zero_ratio bas` — RS "occupees toute l'annee" indiscernables des RP dans les features actuelles. Lever ce plafond demanderait des donnees externes (meteo, geolocalisation, type d'habitation).
 
 ## models/forecaster.py
 
