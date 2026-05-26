@@ -63,7 +63,7 @@ GEN_NOISE_RHO = 0.7  # autocorrélation AR(1) entre slots consécutifs
 GEN_CORPUS_N = 300    # courbes par classe dans le corpus de référence built-in
 GEN_CORPUS_DAYS = 14  # jours par courbe dans le corpus
 
-_env_cap = os.environ.get("ENEDIS_MAX_METERS", "1000")
+_env_cap = os.environ.get("ENEDIS_MAX_METERS", "500")
 MAX_METERS_UPLOAD: int | None = None if _env_cap.lower() in ("none", "0", "all") else int(_env_cap)
 
 
