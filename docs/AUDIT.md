@@ -1,7 +1,26 @@
 # Audit scientifique — Enedis Analytics
 
-Date : 2026-04-04. Perimetre : code source complet (config, utils, models, pages).
+Date du snapshot : 2026-04-04. Perimetre : code source complet (config, utils, models, pages).
 Aucune modification de code n'est recommandee sans validation sur donnees labellisees.
+
+## Mise a jour 2026-05-26 — etat des recommandations
+
+Plusieurs reco de l'audit ont ete implementees depuis. Le contenu ci-dessous est conserve comme reference historique mais ne reflete plus l'etat actuel pour les points suivants :
+
+| Reco audit | Etat 2026-05-26 |
+|---|---|
+| #1 — Fourier `period` fixe a 48 dans `RidgeForecaster` | **Fait.** `models/forecaster.py:make_fourier_features(n, n_harmonics=3, period=48, offset=0)`. |
+| #3 — Validation de la generation (DTW/MMD) | **Fait (proxy).** `CurveGenerator.similarity_report` retourne Pearson sur profil, Wasserstein sur energie, score discriminatif (LR test gen-vs-real). DTW formel non implemente. |
+| #4 — Calibrer `GEN_NOISE_STD` sur les donnees | **Fait partiellement.** Le generateur calcule la variabilite empirique par slot et la combine avec le bruit AR(1) lors du `fit`. |
+| #5 — Bruit AR(1) au lieu de i.i.d. dans le generateur | **Fait.** `GEN_NOISE_RHO=0.7` dans config, applique dans `generate` et `generate_bootstrap`. Mode bootstrap ajoute (reechantillonnage de slots reels). |
+| #7 — Permutation importance au lieu de decomposition PCA | **Fait.** `EnergyClassifier.feature_importances` utilise `sklearn.inspection.permutation_importance` (n_repeats=10, scoring f1_weighted). La PCA a ete entierement retiree du pipeline. |
+| Pipeline classification | **Change.** Plus de PCA : `StandardScaler -> RandomForest(300, class_weight=balanced)`. Seuil decisionnel abaisse a 0.35 pour gain de rappel RS. CV5 stratifiee en plus du split simple. |
+| #6 — Split train/test temporel (classif) | Non fait. Toujours `train_test_split` aleatoire. |
+| #2 — SARIMA au lieu de ARIMA(2,1,2) | Non fait. ARIMA fixe conserve. |
+| #8 — Plus de 3 harmoniques Fourier dans `extract_features` | Non fait. Toujours 3. |
+| Features meteo | Non fait. |
+
+Les features ont par ailleurs ete enrichies depuis l'audit : 17 features au total (vs 7 initiales) — ajout de `zero_ratio`, `max_gap_days`, `n_absence_periods`, `active_days_ratio`, `seasonal_presence_gap`, `autocorr_lag48`, `morning_ratio`, `cv_weekly`, `skewness`.
 
 ---
 
