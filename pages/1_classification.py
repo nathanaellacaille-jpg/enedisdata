@@ -123,7 +123,7 @@ def _train_model(features: pd.DataFrame, labels: dict):
     # Validation croisée stratifiée 5 folds sur la totalité des données labellisées
     cv_pipe = Pipeline([
         ("scaler", StandardScaler()),
-        ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1)),
+        ("clf", RandomForestClassifier(n_estimators=CLF_N_TREES, random_state=42, n_jobs=-1, class_weight="balanced")),
     ])
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     scoring = {
