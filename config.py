@@ -22,8 +22,6 @@ class Palette:
     """Palette de couleurs (niveaux de gris uniquement)."""
 
     LR: str = "#0F172A"
-    ARIMA: str = "#475569"
-    LSTM: str = "#94A3B8"
     REAL: str = "#0F172A"
     BORDER: str = "#E2E8F0"
     TEXT: str = "#0F172A"
@@ -48,20 +46,6 @@ CLF_N_TREES = 300  # legacy : utilise par les anciens snapshots, plus reference 
 FCST_N_LAGS = 192          # 4 jours de lags (Phase 1 tuning : > 192 est marginal, < est sous-optimal)
 FCST_N_FOURIER = 6         # 6 harmoniques journalieres (audit reco #8, marginal sur prevision)
 FCST_HORIZON_H = 24
-FCST_ARIMA_ORDER = (1, 1, 1)              # Phase 1 : (2,1,2) trop complexe, (1,1,1) meilleur ET plus rapide
-FCST_SARIMA_SEASONAL = (1, 0, 1, 48)      # saisonnalite journaliere 48 (audit reco #2)
-
-LSTM_SEQ_LEN = 192      # 4 jours (Phase 1 tuning : meilleur que 336 et 672 sur le set tuning)
-LSTM_HIDDEN = 64        # Phase 1 : 64 > 32 (capacite legerement superieure debloque 2/5 wins)
-LSTM_LAYERS = 1
-LSTM_EPOCHS = 30        # max ; early stopping coupe avant
-LSTM_LR = 2e-3
-LSTM_BATCH_SIZE = 64
-LSTM_PATIENCE = 4
-LSTM_MIN_DELTA = 1e-3
-LSTM_VAL_FRAC = 0.10
-LSTM_DROPOUT = 0.0
-LSTM_USE_ROLLING = True # Phase 1 : rolling mean/std 24h en input -> meilleur jeu de features
 
 GEN_NOISE_STD = 0.15
 GEN_NOISE_RHO = 0.7  # autocorrélation AR(1) entre slots consécutifs

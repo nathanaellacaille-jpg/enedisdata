@@ -6,17 +6,15 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, FCST_ARIMA_ORDER, ROOT_DIR
-from models.forecaster import RidgeForecaster, ARIMAForecaster, LSTMForecaster
+from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, ROOT_DIR
+from models.forecaster import RidgeForecaster
 from utils.data_loader import load_default_ts
 from utils.metrics import compute_metrics
 
 
 # Mapping nom JSON -> libelle affiche (cf. assets/forecast_baseline_metrics.json)
 _MODEL_LABELS = {
-    "arima": "SARIMA",
     "ridge": "Ridge",
-    "lstm": "LSTM",
     "naive_last_day": "Reference",
     "naive_weekly": "Hebdo",
     "seasonal_mean": "Moy. saisonniere",
@@ -104,24 +102,6 @@ def _train_ridge(series_key: str, series: list) -> RidgeForecaster:
     return mdl
 
 
-@st.cache_resource
-def _train_arima(series_key: str, series: list) -> ARIMAForecaster:
-    """Entraine le forecaster ARIMA."""
-    arr = np.array(series, dtype=float)
-    mdl = ARIMAForecaster()
-    mdl.fit(arr, order=FCST_ARIMA_ORDER)
-    return mdl
-
-
-@st.cache_resource
-def _train_lstm(series_key: str, series: list) -> LSTMForecaster:
-    """Entraine le forecaster LSTM."""
-    arr = np.array(series, dtype=float)
-    mdl = LSTMForecaster()
-    mdl.fit(arr)
-    return mdl
-
-
 def _naive_forecast(series: np.ndarray, h: int) -> np.ndarray:
     """Prevision naive : repete le dernier jour connu de la serie d'entrainement."""
     day = series[-STEPS_PER_DAY:]
@@ -199,24 +179,6 @@ ridge = _train_ridge(series_key, train_series.tolist())
 ridge_pred = ridge.predict(horizon)
 naive_pred = _naive_forecast(train_series, horizon)
 
-# 2. SARIMA — saisonnalite 48 (audit reco), chargement apres Ridge libere
-arima_pred = None
-with st.spinner("Chargement SARIMA..."):
-    try:
-        arima = _train_arima(series_key, train_series.tolist())
-        arima_pred = arima.predict(horizon)
-    except Exception as e:
-        st.warning(f"SARIMA indisponible : {e}")
-
-# 3. LSTM — le plus lourd, chargement en dernier
-lstm_pred = None
-with st.spinner("Chargement LSTM..."):
-    try:
-        lstm_model = _train_lstm(series_key, train_series.tolist())
-        lstm_pred = lstm_model.predict(horizon)
-    except Exception as e:
-        st.warning(f"LSTM indisponible : {e}")
-
 last_train_ts = pd.Timestamp(train_ts[-1])
 future_ts = test_ts
 y_eval = test_series
@@ -250,18 +212,6 @@ with tab1:
         mode="lines", name="Ridge",
         line=dict(color=PAL.ACCENT[0], width=1.5, dash="longdash"),
     ))
-    if arima_pred is not None:
-        fig.add_trace(go.Scatter(
-            x=future_ts, y=arima_pred,
-            mode="lines", name="SARIMA",
-            line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
-        ))
-    if lstm_pred is not None:
-        fig.add_trace(go.Scatter(
-            x=future_ts, y=lstm_pred,
-            mode="lines", name="LSTM",
-            line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot"),
-        ))
     fig.add_trace(go.Scatter(
         x=future_ts, y=naive_pred,
         mode="lines", name="Reference",
@@ -290,10 +240,6 @@ with tab1:
 # ── Tab 2 : Resultats ─────────────────────────────────────────────────────────
 with tab2:
     rows = [("Ridge", ridge_pred), ("Reference", naive_pred)]
-    if arima_pred is not None:
-        rows.append(("SARIMA", arima_pred))
-    if lstm_pred is not None:
-        rows.append(("LSTM", lstm_pred))
 
     mae_vals = {name: compute_metrics(y_eval, pred)["MAE"] for name, pred in rows}
     best = min(mae_vals, key=mae_vals.get)
@@ -333,18 +279,6 @@ with tab3:
         mode="lines", name="Ridge",
         line=dict(color=PAL.ACCENT[0], width=1.5),
     ))
-    if arima_pred is not None:
-        fig_h.add_trace(go.Scatter(
-            x=hours, y=np.abs(y_eval - arima_pred),
-            mode="lines", name="SARIMA",
-            line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
-        ))
-    if lstm_pred is not None:
-        fig_h.add_trace(go.Scatter(
-            x=hours, y=np.abs(y_eval - lstm_pred),
-            mode="lines", name="LSTM",
-            line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot"),
-        ))
     fig_h.add_trace(go.Scatter(
         x=hours, y=np.abs(y_eval - naive_pred),
         mode="lines", name="Reference",
@@ -366,20 +300,6 @@ with tab4:
         "Regression lineaire regularisee sur les 4 derniers jours de lags + harmoniques journalieres "
         "+ jour-de-la-semaine en one-hot + indicateur weekend. Apres tuning Phase 1, bat la Reference "
         "de 7% en moyenne sur 50 compteurs."
-    )
-    st.markdown("**SARIMA(1,1,1)(1,0,1,48)**")
-    st.caption(
-        "ARIMA avec saisonnalite journaliere explicite (periode 48 demi-heures). L'ordre AR=1 suffit "
-        "des que la composante saisonniere est captee. Meilleur modele global apres tuning, bat la "
-        "Reference de 9% en moyenne. Plus lent a entrainer (saisonnalite = etat de Kalman 48-dim)."
-    )
-    st.markdown("**LSTM** (multi-step direct + decodeur calendaire + rolling stats 24h)")
-    st.caption(
-        "Reseau de neurones encoder-decoder qui predit les 48 demi-heures en un seul forward, "
-        "conditionne sur le calendrier du futur. Apres tuning Phase 1, bat la baseline hebdomadaire "
-        "65% du temps mais reste 4e du classement global, derriere la Reference (-2% en moyenne). "
-        "Honnete : sans variables exogenes (meteo, jours feries), un LSTM plafonne sous une simple "
-        "repetition du dernier jour sur ce type de smart meter residentiel."
     )
     st.markdown("**Reference** (repeter le dernier jour)")
     st.caption(
