@@ -7,13 +7,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, ROOT_DIR
-from models.forecaster import RidgeForecaster
+from models.forecaster import LGBMForecaster, RidgeForecaster
 from utils.data_loader import load_default_ts
 from utils.metrics import compute_metrics
 
 
 # Mapping nom JSON -> libelle affiche (cf. assets/forecast_baseline_metrics.json)
 _MODEL_LABELS = {
+    "lgbm": "LightGBM",
     "ridge": "Ridge",
     "naive_last_day": "Reference",
     "naive_weekly": "Hebdo",
@@ -102,6 +103,15 @@ def _train_ridge(series_key: str, series: list) -> RidgeForecaster:
     return mdl
 
 
+@st.cache_resource
+def _train_lgbm(series_key: str, series: list) -> LGBMForecaster:
+    """Entraine le forecaster LightGBM DMSF (48 modeles)."""
+    arr = np.array(series, dtype=float)
+    mdl = LGBMForecaster()
+    mdl.fit(arr)
+    return mdl
+
+
 def _naive_forecast(series: np.ndarray, h: int) -> np.ndarray:
     """Prevision naive : repete le dernier jour connu de la serie d'entrainement."""
     day = series[-STEPS_PER_DAY:]
@@ -179,6 +189,11 @@ ridge = _train_ridge(series_key, train_series.tolist())
 ridge_pred = ridge.predict(horizon)
 naive_pred = _naive_forecast(train_series, horizon)
 
+# 2. LightGBM DMSF — 48 modeles, spinner car premier chargement peut prendre ~15s
+with st.spinner("Entrainement LightGBM..."):
+    lgbm = _train_lgbm(series_key, train_series.tolist())
+lgbm_pred = lgbm.predict(horizon)
+
 last_train_ts = pd.Timestamp(train_ts[-1])
 future_ts = test_ts
 y_eval = test_series
@@ -208,6 +223,11 @@ with tab1:
     )
     # Predictions : du plus fonce (meilleur esperé) au plus clair (reference)
     fig.add_trace(go.Scatter(
+        x=future_ts, y=lgbm_pred,
+        mode="lines", name="LightGBM",
+        line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
+    ))
+    fig.add_trace(go.Scatter(
         x=future_ts, y=ridge_pred,
         mode="lines", name="Ridge",
         line=dict(color=PAL.ACCENT[0], width=1.5, dash="longdash"),
@@ -217,17 +237,6 @@ with tab1:
         mode="lines", name="Reference",
         line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot"),
     ))
-
-    # Annotation pic d'ecart Ridge
-    diff = np.abs(y_eval - ridge_pred)
-    peak_idx = int(np.argmax(diff))
-    peak_ts = future_ts[peak_idx] if peak_idx < len(future_ts) else future_ts[-1]
-    fig.add_annotation(
-        x=str(peak_ts), y=float(ridge_pred[peak_idx]),
-        text="Ecart max Ridge",
-        showarrow=True, arrowhead=2, arrowcolor=PAL.TEXT_MUTED,
-        font=dict(size=10, color=PAL.TEXT_MUTED),
-    )
 
     fig.update_layout(
         **_plotly_base(),
@@ -239,7 +248,7 @@ with tab1:
 
 # ── Tab 2 : Resultats ─────────────────────────────────────────────────────────
 with tab2:
-    rows = [("Ridge", ridge_pred), ("Reference", naive_pred)]
+    rows = [("LightGBM", lgbm_pred), ("Ridge", ridge_pred), ("Reference", naive_pred)]
 
     mae_vals = {name: compute_metrics(y_eval, pred)["MAE"] for name, pred in rows}
     best = min(mae_vals, key=mae_vals.get)
@@ -275,6 +284,11 @@ with tab3:
 
     fig_h = go.Figure()
     fig_h.add_trace(go.Scatter(
+        x=hours, y=np.abs(y_eval - lgbm_pred),
+        mode="lines", name="LightGBM",
+        line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
+    ))
+    fig_h.add_trace(go.Scatter(
         x=hours, y=np.abs(y_eval - ridge_pred),
         mode="lines", name="Ridge",
         line=dict(color=PAL.ACCENT[0], width=1.5),
@@ -295,6 +309,12 @@ with tab3:
 
 # ── Tab 4 : Comment ca marche ─────────────────────────────────────────────────
 with tab4:
+    st.markdown("**LightGBM** (DMSF, 48 modeles, n_lags=192, Fourier 6 harmoniques, calendrier)")
+    st.caption(
+        "Direct Multi-Step Forecasting : un LGBMRegressor distinct par pas horizon (h=0..47), "
+        "entraine sur le residu vs J-1. Pas d'accumulation d'erreur contrairement a l'autoregressif. "
+        "Parametres conservateurs pour Streamlit Cloud : n_estimators=200, num_leaves=31."
+    )
     st.markdown("**Ridge** (n_lags=192, Fourier 6 harmoniques, StandardScaler, calendrier explicite)")
     st.caption(
         "Regression lineaire regularisee sur les 4 derniers jours de lags + harmoniques journalieres "

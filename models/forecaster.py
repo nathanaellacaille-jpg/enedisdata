@@ -6,6 +6,16 @@ from config import (
     FCST_N_LAGS, FCST_N_FOURIER, FCST_HORIZON_H, STEPS_PER_DAY,
 )
 
+_LGBM_PARAMS = dict(
+    n_estimators=200,
+    num_leaves=31,
+    learning_rate=0.05,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    n_jobs=1,
+    verbose=-1,
+)
+
 _RIDGE_ALPHAS_LOG = np.logspace(-4, 3, 20)  # 20 valeurs en log space, audit reco
 
 
@@ -36,6 +46,69 @@ def _calendar_block(n: int, offset: int) -> np.ndarray:
     dow_oh = np.eye(7, dtype=np.float32)[dow]
     we = (dow >= 5).astype(np.float32).reshape(-1, 1)
     return np.hstack([dow_oh, we])
+
+
+class LGBMForecaster:
+    """LightGBM DMSF : 48 modeles independants, un par pas horizon, residu J-1.
+
+    Approche Direct Multi-Step Forecasting : pour chaque horizon h=0..47, un
+    LGBMRegressor predit le residu (y[t+h] - y[t+h-48]) a partir des lags en t.
+    Avantage vs autoressif : pas d'accumulation d'erreur ; chaque modele est
+    entraine directement sur sa cible.
+    """
+
+    def __init__(self, n_lags: int = FCST_N_LAGS, n_fourier: int = FCST_N_FOURIER):
+        """Initialise le forecaster LightGBM DMSF."""
+        self.n_lags = n_lags
+        self.n_fourier = n_fourier
+        self._models: list = []
+        self._last_window: np.ndarray | None = None
+        self._last_day: np.ndarray | None = None
+        self._series_len: int = 0
+
+    def fit(self, series: np.ndarray, y=None):
+        """Entraine 48 LGBMRegressor sur les residus J-1, un par pas horizon."""
+        import lightgbm as lgb
+        n = len(series)
+        # n_samp garantit series[origin+47] et series[origin-1] sont toujours valides
+        n_samp = n - self.n_lags - STEPS_PER_DAY
+        if n_samp <= 0:
+            raise ValueError(f"Serie trop courte: {n}")
+        origins = np.arange(self.n_lags, self.n_lags + n_samp)
+        # Matrice de lags commune (col j = lag j+1, plus recent en premier)
+        j = np.arange(self.n_lags)
+        lag_X = series[origins[:, None] - j[None, :] - 1].astype(np.float32)
+
+        self._models = []
+        for h in range(STEPS_PER_DAY):
+            fourier_X = make_fourier_features(n_samp, self.n_fourier, offset=self.n_lags + h)
+            cal_X = _calendar_block(n_samp, offset=self.n_lags + h)
+            X = np.hstack([lag_X, fourier_X, cal_X]).astype(np.float32)
+            y_res = (series[origins + h] - series[origins + h - STEPS_PER_DAY]).astype(np.float32)
+            mdl = lgb.LGBMRegressor(**_LGBM_PARAMS)
+            mdl.fit(X, y_res)
+            self._models.append(mdl)
+
+        self._last_window = series[-self.n_lags:].copy()
+        self._last_day = series[-STEPS_PER_DAY:].copy()
+        self._series_len = len(series)
+        return self
+
+    def predict(self, h: int) -> np.ndarray:
+        """Predit h pas : residu LightGBM[step] + naive J-1[slot]."""
+        import warnings
+        lags = self._last_window[::-1]  # plus recent en premier
+        preds = []
+        for step in range(h):
+            mdl = self._models[step % STEPS_PER_DAY]
+            f_row = make_fourier_features(1, self.n_fourier, offset=self._series_len + step)[0]
+            cal_row = _calendar_block(1, offset=self._series_len + step)[0]
+            x = np.hstack([lags, f_row, cal_row]).reshape(1, -1).astype(np.float32)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                residual = float(mdl.predict(x)[0])
+            preds.append(residual + float(self._last_day[step % STEPS_PER_DAY]))
+        return np.array(preds)
 
 
 class RidgeForecaster:
