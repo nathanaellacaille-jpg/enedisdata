@@ -6,8 +6,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, ROOT_DIR
-from models.forecaster import LGBMForecaster, RidgeForecaster
+from config import PAL, FCST_HORIZON_H, STEPS_PER_DAY, ROOT_DIR
+from models.forecaster import LGBMForecasterV2, RidgeForecaster, LGBM_V2_LOOKBACK
 from utils.data_loader import load_default_ts
 from utils.metrics import compute_metrics
 
@@ -104,10 +104,10 @@ def _train_ridge(series_key: str, series: list) -> RidgeForecaster:
 
 
 @st.cache_resource
-def _train_lgbm(series_key: str, series: list) -> LGBMForecaster:
-    """Entraine le forecaster LightGBM DMSF (48 modeles)."""
+def _train_lgbm(series_key: str, series: list) -> LGBMForecasterV2:
+    """Entraine le forecaster LightGBM DMSF v2 (29 features domaine, 48 modeles)."""
     arr = np.array(series, dtype=float)
-    mdl = LGBMForecaster()
+    mdl = LGBMForecasterV2()
     mdl.fit(arr)
     return mdl
 
@@ -159,8 +159,9 @@ meter_df = df[df["meter_id"] == selected].sort_values("ts").reset_index(drop=Tru
 series = meter_df["kw"].values.astype(float)
 ts_index = meter_df["ts"].values
 
-if len(series) < FCST_N_LAGS + FCST_HORIZON_H * 2 + STEPS_PER_DAY:
-    min_days = (FCST_N_LAGS + FCST_HORIZON_H * 2 + STEPS_PER_DAY) // STEPS_PER_DAY
+_MIN_PTS = LGBM_V2_LOOKBACK + STEPS_PER_DAY + FCST_HORIZON_H * 2
+if len(series) < _MIN_PTS:
+    min_days = _MIN_PTS // STEPS_PER_DAY + 1
     st.warning(f"Serie trop courte pour la prevision (minimum {min_days} jours).")
     st.stop()
 
@@ -309,11 +310,12 @@ with tab3:
 
 # ── Tab 4 : Comment ca marche ─────────────────────────────────────────────────
 with tab4:
-    st.markdown("**LightGBM** (DMSF, 48 modeles, n_lags=192, Fourier 6 harmoniques, calendrier)")
+    st.markdown("**LightGBM v2** (DMSF, 48 modeles, 29 features domaine-metier, Fourier 6 harmoniques, calendrier)")
     st.caption(
         "Direct Multi-Step Forecasting : un LGBMRegressor distinct par pas horizon (h=0..47), "
-        "entraine sur le residu vs J-1. Pas d'accumulation d'erreur contrairement a l'autoregressif. "
-        "Parametres conservateurs pour Streamlit Cloud : n_estimators=200, num_leaves=31."
+        "entraine sur le residu vs J-1. Features : meme slot J-1/J-2/J-7, moyenne 7j, ecart-type 7j, "
+        "lag-1/lag-2, delta journalier, Fourier x6, one-hot jour-de-semaine. "
+        "29 features vs 192 lags bruts (V1) : moins de colinearity, meilleure generalisation."
     )
     st.markdown("**Ridge** (n_lags=192, Fourier 6 harmoniques, StandardScaler, calendrier explicite)")
     st.caption(

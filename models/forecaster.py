@@ -16,6 +16,21 @@ _LGBM_PARAMS = dict(
     verbose=-1,
 )
 
+# V2 : features domaine-metier, regularisation renforcee
+LGBM_V2_LOOKBACK = 336   # 7 jours — horizon max de slot_J7
+_LGBM_V2_PARAMS = dict(
+    n_estimators=500,
+    num_leaves=31,
+    learning_rate=0.02,
+    subsample=0.7,
+    colsample_bytree=0.5,
+    min_child_samples=50,
+    reg_alpha=0.1,
+    reg_lambda=1.0,
+    n_jobs=1,
+    verbose=-1,
+)
+
 _RIDGE_ALPHAS_LOG = np.logspace(-4, 3, 20)  # 20 valeurs en log space, audit reco
 
 
@@ -108,6 +123,119 @@ class LGBMForecaster:
                 warnings.simplefilter("ignore")
                 residual = float(mdl.predict(x)[0])
             preds.append(residual + float(self._last_day[step % STEPS_PER_DAY]))
+        return np.array(preds)
+
+
+class LGBMForecasterV2:
+    """LightGBM DMSF v2 : 29 features domaine-metier au lieu de 192 lags bruts.
+
+    Features par echantillon (origin t, horizon h) :
+      Slot-level (cible t+h) : J-1/J-2/J-7 meme slot, moyenne 7j, std 7j, delta_slot
+      Etat courant (en t)    : lag-1, lag-2, delta journalier (aujourd'hui - hier)
+      Temporels (en t+h)     : Fourier journalier 6 harmoniques, DOW one-hot + weekend
+    Target : residu vs J-1 (meme que V1), DMSF 48 modeles independants.
+    Avantage vs V1 : pas de lags correles → moins d'overfitting, entrainement 3x plus rapide.
+    """
+
+    def __init__(self, n_fourier: int = FCST_N_FOURIER):
+        """Initialise le forecaster LightGBM V2."""
+        self.n_fourier = n_fourier
+        self._models: list = []
+        self._last_known: np.ndarray | None = None
+        self._series_len: int = 0
+
+    def fit(self, series: np.ndarray, y=None):
+        """Entraine 48 LGBMRegressor avec features domaine-metier."""
+        import lightgbm as lgb
+        n = len(series)
+        n_samp = n - LGBM_V2_LOOKBACK - STEPS_PER_DAY
+        if n_samp <= 0:
+            raise ValueError(
+                f"Serie trop courte pour LGBMv2 ({n} pts, min {LGBM_V2_LOOKBACK + STEPS_PER_DAY + 1})"
+            )
+        origins = np.arange(LGBM_V2_LOOKBACK, LGBM_V2_LOOKBACK + n_samp)
+
+        # Features independantes de h — calculees une seule fois
+        cs = np.concatenate([[0.0], np.cumsum(series)])
+        lag1 = series[origins - 1].astype(np.float32)
+        lag2 = series[origins - 2].astype(np.float32)
+        day_mean_curr = ((cs[origins] - cs[origins - STEPS_PER_DAY]) / STEPS_PER_DAY).astype(np.float32)
+        day_mean_prev = ((cs[origins - STEPS_PER_DAY] - cs[origins - 2 * STEPS_PER_DAY]) / STEPS_PER_DAY).astype(np.float32)
+        delta_day = (day_mean_curr - day_mean_prev).reshape(-1, 1)
+        base_X = np.hstack([lag1.reshape(-1, 1), lag2.reshape(-1, 1), delta_day])
+
+        self._models = []
+        for h in range(STEPS_PER_DAY):
+            # Features slot-level (pour le temps de prediction origin+h)
+            slot_J1 = series[origins + h - STEPS_PER_DAY].astype(np.float32)
+            slot_J2 = series[origins + h - 2 * STEPS_PER_DAY].astype(np.float32)
+            slot_J7 = series[origins + h - 7 * STEPS_PER_DAY].astype(np.float32)
+            slot_days = np.stack(
+                [series[origins + h - k * STEPS_PER_DAY] for k in range(1, 8)], axis=1
+            ).astype(np.float32)
+            slot_mean_7d = slot_days.mean(axis=1)
+            slot_std_7d = slot_days.std(axis=1)
+            delta_slot = slot_J1 - slot_J2
+
+            fourier_X = make_fourier_features(n_samp, self.n_fourier, offset=LGBM_V2_LOOKBACK + h)
+            cal_X = _calendar_block(n_samp, offset=LGBM_V2_LOOKBACK + h)
+
+            X = np.hstack([
+                slot_J1.reshape(-1, 1), slot_J2.reshape(-1, 1), slot_J7.reshape(-1, 1),
+                slot_mean_7d.reshape(-1, 1), slot_std_7d.reshape(-1, 1),
+                delta_slot.reshape(-1, 1),
+                base_X, fourier_X, cal_X,
+            ]).astype(np.float32)
+
+            y_res = (series[origins + h] - slot_J1).astype(np.float32)
+            mdl = lgb.LGBMRegressor(**_LGBM_V2_PARAMS)
+            mdl.fit(X, y_res)
+            self._models.append(mdl)
+
+        self._last_known = series[-LGBM_V2_LOOKBACK:].copy()
+        self._series_len = len(series)
+        return self
+
+    def predict(self, h: int) -> np.ndarray:
+        """Predit h pas : residu LGBMv2[step] + naive J-1[slot]."""
+        import warnings
+        s = self._last_known   # series[-336:]
+        n = self._series_len
+
+        # Features independantes du pas
+        lag1 = float(s[-1])
+        lag2 = float(s[-2])
+        delta_day = float(s[-STEPS_PER_DAY:].mean() - s[-2 * STEPS_PER_DAY:-STEPS_PER_DAY].mean())
+
+        preds = []
+        for step in range(h):
+            mdl = self._models[step % STEPS_PER_DAY]
+
+            # Slot-level features pour le slot cible (n + step)
+            slot_J1 = float(s[step - STEPS_PER_DAY])        # s[-48+step]
+            slot_J2 = float(s[step - 2 * STEPS_PER_DAY])
+            slot_J7 = float(s[step - 7 * STEPS_PER_DAY])
+            slot_days = np.array([float(s[step - k * STEPS_PER_DAY]) for k in range(1, 8)])
+            slot_mean_7d = float(slot_days.mean())
+            slot_std_7d = float(slot_days.std())
+            delta_slot = slot_J1 - slot_J2
+
+            f_row = make_fourier_features(1, self.n_fourier, offset=n + step)[0]
+            cal_row = _calendar_block(1, offset=n + step)[0]
+
+            x = np.array(
+                [slot_J1, slot_J2, slot_J7,
+                 slot_mean_7d, slot_std_7d, delta_slot,
+                 lag1, lag2, delta_day,
+                 *f_row, *cal_row],
+                dtype=np.float32,
+            ).reshape(1, -1)
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                residual = float(mdl.predict(x)[0])
+            preds.append(residual + slot_J1)
+
         return np.array(preds)
 
 
