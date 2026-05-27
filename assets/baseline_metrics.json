@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-05-26T20:34:48Z",
+  "computed_at": "2026-05-27T09:00:23Z",
   "dataset": {
     "n_samples": 500,
     "n_features": 26,
@@ -30,5 +30,47 @@
     "n_errors": 28,
     "n_false_negatives_rs": 17,
     "n_false_positives_rs": 11
-  }
+  },
+  "feature_importances_top10": [
+    {
+      "feature": "vacation_weeks",
+      "importance": 0.13645825195164885
+    },
+    {
+      "feature": "max_gap_days",
+      "importance": 0.04297899567031412
+    },
+    {
+      "feature": "dow_consistency",
+      "importance": 0.024818783364247882
+    },
+    {
+      "feature": "summer_weekend_boost",
+      "importance": 0.014988564316396946
+    },
+    {
+      "feature": "autocorr_lag48",
+      "importance": 0.0055567947776166875
+    },
+    {
+      "feature": "ratio_we_wd",
+      "importance": 0.001990793706222571
+    },
+    {
+      "feature": "skewness",
+      "importance": 0.0018205680872873293
+    },
+    {
+      "feature": "peak_hour_ratio",
+      "importance": 0.00138126000342087
+    },
+    {
+      "feature": "seasonal_ratio",
+      "importance": 0.0012152441104306504
+    },
+    {
+      "feature": "weekly_entropy",
+      "importance": 0.0006076220552153252
+    }
+  ]
 }

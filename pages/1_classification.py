@@ -89,28 +89,6 @@ def _predict_all(features: pd.DataFrame, labels: dict) -> tuple:
     )
 
 
-@st.cache_data(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
-def _compute_corr(features: pd.DataFrame) -> pd.DataFrame:
-    """Calcule la matrice de correlation des features (cache par dataset)."""
-    return features.corr()
-
-
-@st.cache_data(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
-def _compute_importances(features: pd.DataFrame, labels: dict) -> pd.Series:
-    """Calcule la permutation importance (cache par dataset)."""
-    clf, *_ = _train_model(features, labels)
-    if clf is None:
-        return pd.Series(dtype=float)
-    common = [mid for mid in features.index if str(mid) in labels]
-    if len(common) >= 2:
-        X_imp = features.loc[common]
-        y_imp = np.array([labels[str(mid)] for mid in common])
-    else:
-        X_imp = features
-        y_imp = pd.Series(index=features.index, dtype=int).fillna(0).values.astype(int)
-    return clf.feature_importances(X_imp, y_imp)
-
-
 @st.cache_resource(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
 def _train_model(features: pd.DataFrame, labels: dict):
     """Entraine EnergyClassifier (Stacking, threshold tune) et retourne (model, X_test, y_test, y_proba_test, cv_scores).
@@ -313,55 +291,22 @@ if clf is not None and not meter_feat.empty:
     fig_radar.update_layout(**_radar_layout)
     st.plotly_chart(fig_radar, width="stretch")
 
-    st.markdown("---")
-    st.markdown("### Facteurs determinants")
-    importances = _compute_importances(features, labels)
-    top5 = importances.head(5)
-    fig_imp = go.Figure(go.Bar(
-        x=top5.values[::-1],
-        y=[_FEAT_LABELS.get(f, f) for f in top5.index[::-1]],
-        orientation="h",
-        marker_color=PAL.ACCENT[0],
-        width=0.5,
-    ))
-    fig_imp.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Facteurs les plus determinants", xaxis_title="Importance")
-    st.plotly_chart(fig_imp, width="stretch")
-
-# Positionnement du compteur parmi les autres
-if clf is not None and not pred_series.empty and len(features) >= 2:
-    st.markdown("---")
-    st.markdown("### Positionnement parmi les compteurs")
-
-    col_x, col_y = "zero_ratio", "ratio_we_wd"
-    preds = pred_series.reindex(features.index, fill_value=0)
-    colors = [PAL.ACCENT[2] if p == 1 else PAL.ACCENT[1] for p in preds]
-    labels_txt = ["RS" if p == 1 else "RP" for p in preds]
-
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(
-        x=features[col_x], y=features[col_y],
-        mode="markers",
-        marker=dict(color=colors, size=7, opacity=0.7),
-        text=[f"{mid}<br>{lbl}" for mid, lbl in zip(features.index, labels_txt)],
-        hovertemplate="%{text}<br>X=%{x:.3f}<br>Y=%{y:.3f}<extra></extra>",
-        name="Compteurs",
-    ))
-    if selected in features.index:
-        fig2.add_trace(go.Scatter(
-            x=[features.loc[selected, col_x]], y=[features.loc[selected, col_y]],
-            mode="markers",
-            marker=dict(color="rgba(0,0,0,0)", size=16, line=dict(color=PAL.TEXT, width=2)),
-            text=[f"{selected} (selectionne)"],
-            hovertemplate="%{text}<extra></extra>",
-            name="Compteur selectionne",
+    baseline_imp = _load_baseline_metrics()
+    if baseline_imp and "feature_importances_top10" in baseline_imp:
+        st.markdown("---")
+        st.markdown("### Facteurs determinants")
+        top5 = baseline_imp["feature_importances_top10"][:5]
+        names = [_FEAT_LABELS.get(d["feature"], d["feature"]) for d in top5]
+        vals = [d["importance"] for d in top5]
+        fig_imp = go.Figure(go.Bar(
+            x=vals[::-1],
+            y=names[::-1],
+            orientation="h",
+            marker_color=PAL.ACCENT[0],
+            width=0.5,
         ))
-    fig2.update_layout(
-        **_plotly_base(),
-        margin=dict(l=16, r=16, t=32, b=16),
-        xaxis_title=_FEAT_LABELS.get(col_x, col_x),
-        yaxis_title=_FEAT_LABELS.get(col_y, col_y),
-    )
-    st.plotly_chart(fig2, width="stretch")
+        fig_imp.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Facteurs les plus determinants", xaxis_title="Importance (permutation)")
+        st.plotly_chart(fig_imp, width="stretch")
 
 # Performance du modele
 if clf is not None and y_test is not None and y_proba_test is not None:

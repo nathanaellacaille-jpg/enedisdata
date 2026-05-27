@@ -99,14 +99,19 @@ class EnergyClassifier:
         return self._pipe.predict_proba(X)[:, 1]
 
     def feature_importances(self, X: pd.DataFrame, y: np.ndarray) -> pd.Series:
-        """Permutation importance sur l'espace original (n_repeats=3 pour rester leger sur Cloud)."""
+        """Permutation importance sur l'espace original.
+
+        n_jobs=1 : eviter le multiprocessing qui copie le pipeline complet
+        dans chaque worker (~1 GB par copie avec le Stacking) → OOM sur Cloud.
+        Calcul one-shot via scripts/phase0_diagnostic.py.
+        """
         from sklearn.inspection import permutation_importance
         result = permutation_importance(
             self._pipe, X, y,
-            n_repeats=3,  # reduit de 10 a 3 : ~3x plus rapide, importances toujours stables
+            n_repeats=3,
             random_state=42,
             scoring="f1_weighted",
-            n_jobs=-1,
+            n_jobs=1,
         )
         return pd.Series(
             result.importances_mean,

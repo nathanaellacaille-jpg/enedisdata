@@ -222,6 +222,18 @@ def main() -> None:
             "n_false_positives_rs": int(len(fp)),
         },
     }
+    # Permutation importance sur le pipeline entraine sur l'ensemble du dataset
+    print("\n[7/7] Calcul des permutation importances (n_jobs=1 pour eviter blowup RAM)...")
+    full_clf = EnergyClassifier()
+    full_clf.fit(X, y)
+    imps = full_clf.feature_importances(X, y).head(10)
+    payload["feature_importances_top10"] = [
+        {"feature": str(k), "importance": float(v)} for k, v in imps.items()
+    ]
+    print("  Top 10 features par importance :")
+    for k, v in imps.items():
+        print(f"    {k:30s} {v:.4f}")
+
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, ensure_ascii=False)
     print(f"\nMetriques baseline ecrites dans {out}")
