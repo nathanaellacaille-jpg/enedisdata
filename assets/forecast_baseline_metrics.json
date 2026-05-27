@@ -395,6 +395,12 @@
     }
   },
   "win_rates_vs_naive_weekly": {
+    "lgbm": {
+      "vs_naive_weekly": null,
+      "n_compared": 10,
+      "median_gain_pct": null,
+      "_note": "Quick backtest 5 RP x 2 folds — naive_weekly non inclus dans le script"
+    },
     "ridge": {
       "vs_naive_weekly": 0.7533333333333333,
       "n_compared": 150,
