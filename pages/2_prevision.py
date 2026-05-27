@@ -175,12 +175,22 @@ if len(series) < FCST_N_LAGS + FCST_HORIZON_H * 2 + STEPS_PER_DAY:
     st.stop()
 
 horizon = FCST_HORIZON_H * 2
-series_key = f"{selected}_{len(series)}"
 
-train_series = series[:-horizon]
+# Capping fenetre d'entrainement a 90 jours pour tenir dans 1 GB Streamlit Cloud.
+# Phase 0 v2 a montre que MAE est equivalente entre 60-90 jours et serie complete
+# (la saisonnalite hebdo + 4 jours de lags suffisent), donc pas de perte de qualite.
+TRAIN_WINDOW_PTS = 90 * STEPS_PER_DAY
+if len(series) > TRAIN_WINDOW_PTS + horizon:
+    train_series = series[-TRAIN_WINDOW_PTS - horizon:-horizon]
+    train_ts = ts_index[-TRAIN_WINDOW_PTS - horizon:-horizon]
+else:
+    train_series = series[:-horizon]
+    train_ts = ts_index[:-horizon]
 test_series = series[-horizon:]
-train_ts = ts_index[:-horizon]
 test_ts = ts_index[-horizon:]
+
+# Cache key inclut la taille de la fenetre pour invalider proprement
+series_key = f"{selected}_{len(train_series)}"
 
 # ── Chargement sequentiel des modeles (un par un pour eviter les pics RAM) ────
 
