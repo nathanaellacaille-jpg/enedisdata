@@ -1,12 +1,79 @@
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, FCST_ARIMA_ORDER
+from config import PAL, FCST_HORIZON_H, FCST_N_LAGS, STEPS_PER_DAY, FCST_ARIMA_ORDER, ROOT_DIR
 from models.forecaster import RidgeForecaster, ARIMAForecaster, LSTMForecaster
 from utils.data_loader import load_default_ts
 from utils.metrics import compute_metrics
+
+
+# Mapping nom JSON -> libelle affiche (cf. assets/forecast_baseline_metrics.json)
+_MODEL_LABELS = {
+    "arima": "SARIMA",
+    "ridge": "Ridge",
+    "lstm": "LSTM",
+    "naive_last_day": "Reference",
+    "naive_weekly": "Hebdo",
+    "seasonal_mean": "Moy. saisonniere",
+    "naive_persistence": "Persistance",
+}
+
+
+@st.cache_data
+def _load_forecast_baseline() -> dict | None:
+    """Charge assets/forecast_baseline_metrics.json (Phase 0 v2) ou None."""
+    p = Path(ROOT_DIR) / "assets" / "forecast_baseline_metrics.json"
+    if not p.exists():
+        return None
+    try:
+        with open(p, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def _render_perf_banner(metrics: dict) -> None:
+    """Affiche le top 4 modeles MAE + table detaillee depuis Phase 0 v2."""
+    models = metrics["models"]
+    win_rates = metrics.get("win_rates_vs_naive_weekly", {})
+    sorted_models = sorted(models.items(), key=lambda kv: kv[1]["mae_mean"])
+
+    sample = metrics.get("sample", {})
+    n_meters = sample.get("n_meters", "?")
+    n_folds = sample.get("n_folds_per_meter", "?")
+
+    st.markdown("**Performance globale des modeles**")
+    st.caption(f"Backtest {n_meters} compteurs x {n_folds} folds rolling. "
+               f"MAE moyenne en kW (plus bas = meilleur).")
+
+    cols = st.columns(4)
+    for i, (name, m) in enumerate(sorted_models[:4]):
+        label = _MODEL_LABELS.get(name, name)
+        cols[i].metric(f"#{i + 1} {label}", f"{m['mae_mean']:.3f} kW", delta_color="off")
+
+    with st.expander("Detail complet et taux de victoire vs Hebdo (semaine -7j)"):
+        rows = []
+        for name, m in sorted_models:
+            wr = win_rates.get(name, {})
+            rows.append({
+                "Modele": _MODEL_LABELS.get(name, name),
+                "MAE (kW)": round(m["mae_mean"], 3),
+                "RMSE (kW)": round(m.get("rmse_mean", float("nan")), 3),
+                "Bat l'Hebdo": f"{wr.get('vs_naive_weekly', 0) * 100:.0f}%" if wr else "—",
+                "Gain median": f"{wr.get('median_gain_pct', 0):+.1f}%" if wr else "—",
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        st.caption(
+            f"Phase 0 v2 — calcule le {metrics.get('computed_at', '?')}. "
+            "Les baselines naives (Reference = dernier jour repete, Hebdo = -7j, "
+            "Moy. saisonniere = moyenne (jour, slot), Persistance = derniere valeur) "
+            "servent de niveaux de comparaison."
+        )
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -88,6 +155,12 @@ with st.sidebar:
 
 st.markdown("## Prevision")
 
+# Bandeau performance globale : Phase 0 v2 (50 compteurs x 3 folds)
+_baseline = _load_forecast_baseline()
+if _baseline is not None:
+    _render_perf_banner(_baseline)
+    st.markdown("---")
+
 if df is None or selected is None:
     st.caption("Jeu de donnees indisponible.")
     st.stop()
@@ -116,14 +189,14 @@ ridge = _train_ridge(series_key, train_series.tolist())
 ridge_pred = ridge.predict(horizon)
 naive_pred = _naive_forecast(train_series, horizon)
 
-# 2. ARIMA — moyenne complexite, chargement apres Ridge libere
+# 2. SARIMA — saisonnalite 48 (audit reco), chargement apres Ridge libere
 arima_pred = None
-with st.spinner("Chargement ARIMA..."):
+with st.spinner("Chargement SARIMA..."):
     try:
         arima = _train_arima(series_key, train_series.tolist())
         arima_pred = arima.predict(horizon)
     except Exception as e:
-        st.warning(f"ARIMA indisponible : {e}")
+        st.warning(f"SARIMA indisponible : {e}")
 
 # 3. LSTM — le plus lourd, chargement en dernier
 lstm_pred = None
@@ -170,7 +243,7 @@ with tab1:
     if arima_pred is not None:
         fig.add_trace(go.Scatter(
             x=future_ts, y=arima_pred,
-            mode="lines", name="ARIMA",
+            mode="lines", name="SARIMA",
             line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
         ))
     if lstm_pred is not None:
@@ -208,7 +281,7 @@ with tab1:
 with tab2:
     rows = [("Ridge", ridge_pred), ("Reference", naive_pred)]
     if arima_pred is not None:
-        rows.append(("ARIMA", arima_pred))
+        rows.append(("SARIMA", arima_pred))
     if lstm_pred is not None:
         rows.append(("LSTM", lstm_pred))
 
@@ -253,7 +326,7 @@ with tab3:
     if arima_pred is not None:
         fig_h.add_trace(go.Scatter(
             x=hours, y=np.abs(y_eval - arima_pred),
-            mode="lines", name="ARIMA",
+            mode="lines", name="SARIMA",
             line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
         ))
     if lstm_pred is not None:
@@ -278,23 +351,29 @@ with tab3:
 
 # ── Tab 4 : Comment ca marche ─────────────────────────────────────────────────
 with tab4:
-    st.markdown("**Ridge**")
+    st.markdown("**Ridge** (n_lags=192, Fourier 6 harmoniques, StandardScaler, calendrier explicite)")
     st.caption(
-        "Analyse les 8 derniers jours de consommation pour predire les 24 prochaines heures. "
-        "Rapide et fiable, il apprend les habitudes journalieres et hebdomadaires du compteur."
+        "Regression lineaire regularisee sur les 4 derniers jours de lags + harmoniques journalieres "
+        "+ jour-de-la-semaine en one-hot + indicateur weekend. Apres tuning Phase 1, bat la Reference "
+        "de 7% en moyenne sur 50 compteurs."
     )
-    st.markdown("**ARIMA**")
+    st.markdown("**SARIMA(1,1,1)(1,0,1,48)**")
     st.caption(
-        "Detecte les tendances et les repetitions a court terme dans la courbe de consommation. "
-        "Performant quand la serie suit des patterns reguliers."
+        "ARIMA avec saisonnalite journaliere explicite (periode 48 demi-heures). L'ordre AR=1 suffit "
+        "des que la composante saisonniere est captee. Meilleur modele global apres tuning, bat la "
+        "Reference de 9% en moyenne. Plus lent a entrainer (saisonnalite = etat de Kalman 48-dim)."
     )
-    st.markdown("**LSTM**")
+    st.markdown("**LSTM** (multi-step direct + decodeur calendaire + rolling stats 24h)")
     st.caption(
-        "Reseau de neurones capable de memoriser des comportements complexes sur plusieurs jours. "
-        "Le plus puissant sur des donnees abondantes."
+        "Reseau de neurones encoder-decoder qui predit les 48 demi-heures en un seul forward, "
+        "conditionne sur le calendrier du futur. Apres tuning Phase 1, bat la baseline hebdomadaire "
+        "65% du temps mais reste 4e du classement global, derriere la Reference (-2% en moyenne). "
+        "Honnete : sans variables exogenes (meteo, jours feries), un LSTM plafonne sous une simple "
+        "repetition du dernier jour sur ce type de smart meter residentiel."
     )
-    st.markdown("**Reference**")
+    st.markdown("**Reference** (repeter le dernier jour)")
     st.caption(
-        "Repete simplement la consommation du jour precedent. "
-        "Sert de base de comparaison : un bon modele doit faire mieux."
+        "Repete simplement la consommation du jour precedent slot par slot. Niveau de comparaison "
+        "incontournable : sur smart meter 30 min sans meteo, 'demain = hier' est tres dur a battre "
+        "et plusieurs modeles fancy echouent a faire mieux."
     )
