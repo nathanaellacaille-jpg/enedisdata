@@ -154,7 +154,13 @@ with st.sidebar:
     # Plus bas → plus de RS detectees (rappel ↑, precision ↓).
     _baseline_for_threshold = _load_baseline_metrics()
     if _baseline_for_threshold is not None:
-        _default_thr = float(_baseline_for_threshold["cv5"].get("threshold_pr_optimal", 0.5))
+        # Defaut = seuil "balanced" (max moyenne recall_RP + recall_RS),
+        # typiquement proche de 0.5. Plus equitable que le PR-F1-optimal qui
+        # favorise la classe majoritaire.
+        _default_thr = float(
+            _baseline_for_threshold["cv5"].get("threshold_balanced")
+            or _baseline_for_threshold["cv5"].get("threshold_pr_optimal", 0.5)
+        )
         st.markdown("**Seuil de decision**")
         threshold_override = st.slider(
             "Probabilite >= seuil -> RS",
@@ -215,7 +221,82 @@ peak_kw = meter_df["kw"].max()
 we_wd = meter_feat["ratio_we_wd"].iloc[0] if not meter_feat.empty else 0.0
 energy_j = mean_conso
 
-# ── Vue unifiee ────────────────────────────────────────────────────────────────
+# ── Performance globale (bloc top, KPI globaux) ───────────────────────────────
+
+if clf is not None and y_test is not None and y_proba_test is not None:
+    st.markdown("### Performance globale du modele")
+
+    baseline = _load_baseline_metrics()
+    if baseline is not None:
+        cv5 = baseline["cv5"]
+        has_oof = "oof" in baseline and baseline["oof"].get("y_proba")
+
+        if has_oof:
+            default_threshold = float(cv5.get("threshold_balanced") or cv5.get("threshold_pr_optimal", 0.5))
+            threshold = threshold_override if threshold_override is not None else default_threshold
+            is_default = abs(threshold - default_threshold) < 1e-3
+
+            st.caption(
+                f"Validation croisee 5 folds sur {baseline['dataset']['n_samples']} compteurs "
+                f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS). "
+                f"Seuil de decision : **{threshold:.2f}**."
+            )
+
+            oof_y = np.array(baseline["oof"]["y_true"])
+            oof_proba = np.array(baseline["oof"]["y_proba"])
+            oof_pred = (oof_proba >= threshold).astype(int)
+            acc = float(accuracy_score(oof_y, oof_pred))
+            f1w = float(f1_score(oof_y, oof_pred, average="weighted"))
+            rec_rs = float(recall_score(oof_y, oof_pred, pos_label=1, zero_division=0))
+            cm_arr = confusion_matrix(oof_y, oof_pred)
+            acc_delta = f"± {cv5['accuracy_std']:.2%}" if is_default else None
+            f1_delta = f"± {cv5['f1_weighted_std']:.2%}" if is_default else None
+            rec_delta = f"± {cv5['recall_rs_std']:.2%}" if is_default else None
+        else:
+            st.caption(
+                f"Validation croisee 5 folds sur {baseline['dataset']['n_samples']} compteurs "
+                f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS)."
+            )
+            acc = cv5["accuracy"]
+            f1w = cv5["f1_weighted"]
+            rec_rs = cv5["recall_rs"]
+            acc_delta = f"± {cv5['accuracy_std']:.2%}"
+            f1_delta = f"± {cv5['f1_weighted_std']:.2%}"
+            rec_delta = f"± {cv5['recall_rs_std']:.2%}"
+            conf = baseline.get("confusion", {})
+            cm_arr = np.array([[conf.get("tn", 0), conf.get("fp", 0)],
+                               [conf.get("fn", 0), conf.get("tp", 0)]])
+
+        col_perf_a, col_perf_b = st.columns([2, 1])
+        with col_perf_a:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Precision globale", f"{acc:.2%}", acc_delta, delta_color="off")
+            c2.metric("Equilibre RS / RP", f"{f1w:.2%}", f1_delta, delta_color="off")
+            c3.metric("Detection residences secondaires", f"{rec_rs:.2%}", rec_delta, delta_color="off")
+        with col_perf_b:
+            fig_cm = go.Figure(go.Heatmap(
+                z=cm_arr,
+                x=["RP", "RS"],
+                y=["RP", "RS"],
+                colorscale=[[0, "#FFFFFF"], [0.5, "#94A3B8"], [1, "#0F172A"]],
+                showscale=False,
+                text=cm_arr.astype(str),
+                texttemplate="%{text}",
+                textfont=dict(size=14),
+            ))
+            fig_cm.update_layout(
+                **_plotly_base(),
+                margin=dict(l=8, r=8, t=24, b=8),
+                title="Matrice de confusion",
+                xaxis_title="Predit",
+                yaxis_title="Reel",
+                height=240,
+            )
+            st.plotly_chart(fig_cm, width="stretch")
+
+    st.markdown("---")
+
+# ── Detail compteur selectionne ───────────────────────────────────────────────
 
 st.markdown(f"### Compteur {selected}")
 
@@ -225,39 +306,24 @@ c2.metric("Pic (kW)", f"{peak_kw:.2f}", delta_color="off")
 c3.metric("Ratio WE/SD", f"{we_wd:.2f}", delta_color="off")
 c4.metric("Energie/j (kWh)", f"{energy_j:.1f}", delta_color="off")
 
-# Verdict de classification
+# Verdict de classification : metric simple + progress bar (plus leger que gauge Plotly)
 if not proba_series.empty and selected in proba_series.index:
     proba_rs = float(proba_series[selected])
-    fig_gauge = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=proba_rs * 100,
-        number={"suffix": "%", "font": {"size": 28, "color": PAL.TEXT}},
-        title={"text": "Score RS", "font": {"size": 13, "color": PAL.TEXT_MUTED}},
-        gauge={
-            "axis": {"range": [0, 100], "tickfont": {"size": 10, "color": PAL.TEXT_MUTED}},
-            "bar": {"color": PAL.TEXT, "thickness": 0.25},
-            "steps": [
-                {"range": [0, 33], "color": "#F8FAFC"},
-                {"range": [33, 66], "color": "#E2E8F0"},
-                {"range": [66, 100], "color": "#334155"},
-            ],
-            "borderwidth": 0,
-            "bgcolor": "white",
-        },
-    ))
-    fig_gauge.update_layout(
-        plot_bgcolor="white", paper_bgcolor="white",
-        margin=dict(l=16, r=16, t=32, b=16),
-        font=dict(family="Inter, sans-serif", size=12, color=PAL.TEXT),
-        height=220,
-    )
-    col_g, col_info = st.columns([1, 2])
-    with col_g:
-        st.plotly_chart(fig_gauge, width="stretch")
-    with col_info:
-        threshold = clf.threshold_ if clf is not None else 0.5
-        label_txt = "RS" if proba_rs >= threshold else "RP"
+    threshold = clf.threshold_ if clf is not None else 0.5
+    label_txt = "RS" if proba_rs >= threshold else "RP"
+    confidence = max(proba_rs, 1 - proba_rs)
+
+    col_v_a, col_v_b = st.columns([1, 2])
+    with col_v_a:
         st.metric("Classe predite", label_txt, delta_color="off")
+    with col_v_b:
+        st.metric(
+            "Probabilite RS",
+            f"{proba_rs:.0%}",
+            delta=f"confiance {confidence:.0%}",
+            delta_color="off",
+        )
+        st.progress(proba_rs, text=f"Seuil decision : {threshold:.2f}")
 else:
     st.caption("Chargez des labels pour obtenir la classification.")
 
@@ -338,76 +404,4 @@ if clf is not None and not meter_feat.empty:
         fig_imp.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Facteurs les plus determinants", xaxis_title="Importance (permutation)")
         st.plotly_chart(fig_imp, width="stretch")
 
-# Performance du modele
-if clf is not None and y_test is not None and y_proba_test is not None:
-    st.markdown("---")
-    st.markdown("### Performance du modele")
-
-    baseline = _load_baseline_metrics()
-    if baseline is not None:
-        cv5 = baseline["cv5"]
-        has_oof = "oof" in baseline and baseline["oof"].get("y_proba")
-
-        if has_oof:
-            default_threshold = float(cv5.get("threshold_pr_optimal", 0.5))
-            threshold = threshold_override if threshold_override is not None else default_threshold
-            is_default = abs(threshold - default_threshold) < 1e-3
-
-            st.caption(
-                f"Validation croisee 5 folds sur {baseline['dataset']['n_samples']} compteurs "
-                f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS). "
-                f"Seuil de decision : **{threshold:.2f}** "
-                f"({'optimum PR sur OOF' if is_default else 'override sidebar'})."
-            )
-
-            oof_y = np.array(baseline["oof"]["y_true"])
-            oof_proba = np.array(baseline["oof"]["y_proba"])
-            oof_pred = (oof_proba >= threshold).astype(int)
-            acc = float(accuracy_score(oof_y, oof_pred))
-            f1w = float(f1_score(oof_y, oof_pred, average="weighted"))
-            rec_rs = float(recall_score(oof_y, oof_pred, pos_label=1, zero_division=0))
-            cm_arr = confusion_matrix(oof_y, oof_pred)
-            acc_delta = f"± {cv5['accuracy_std']:.2%}" if is_default else None
-            f1_delta = f"± {cv5['f1_weighted_std']:.2%}" if is_default else None
-            rec_delta = f"± {cv5['recall_rs_std']:.2%}" if is_default else None
-        else:
-            # Fallback : pas d'OOF dans le JSON → affiche les moyennes agregees
-            st.caption(
-                f"Validation croisee 5 folds sur {baseline['dataset']['n_samples']} compteurs "
-                f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS)."
-            )
-            acc = cv5["accuracy"]
-            f1w = cv5["f1_weighted"]
-            rec_rs = cv5["recall_rs"]
-            acc_delta = f"± {cv5['accuracy_std']:.2%}"
-            f1_delta = f"± {cv5['f1_weighted_std']:.2%}"
-            rec_delta = f"± {cv5['recall_rs_std']:.2%}"
-            conf = baseline.get("confusion", {})
-            cm_arr = np.array([[conf.get("tn", 0), conf.get("fp", 0)],
-                               [conf.get("fn", 0), conf.get("tp", 0)]])
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Precision globale", f"{acc:.2%}", acc_delta, delta_color="off")
-        c2.metric("Equilibre RS / RP", f"{f1w:.2%}", f1_delta, delta_color="off")
-        c3.metric("Detection residences secondaires", f"{rec_rs:.2%}", rec_delta, delta_color="off")
-    else:
-        cm_arr = confusion_matrix(y_test, y_pred)
-
-    labels_names = ["RP", "RS"]
-    fig_cm = go.Figure(go.Heatmap(
-        z=cm_arr,
-        x=labels_names,
-        y=labels_names,
-        colorscale=[[0, "#FFFFFF"], [0.5, "#94A3B8"], [1, "#0F172A"]],
-        showscale=True,
-        text=cm_arr.astype(str),
-        texttemplate="%{text}",
-    ))
-    fig_cm.update_layout(
-        **_plotly_base(),
-        margin=dict(l=16, r=16, t=32, b=16),
-        title="Matrice de confusion",
-        xaxis_title="Predit",
-        yaxis_title="Reel",
-    )
-    st.plotly_chart(fig_cm, width="stretch")
+# (La section Performance globale a ete deplacee en haut de page.)

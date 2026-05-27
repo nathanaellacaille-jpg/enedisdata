@@ -222,7 +222,8 @@ def main() -> None:
             "n_false_positives_rs": int(len(fp)),
         },
     }
-    # Seuil PR-optimal calcule sur les probas OOF (vrai optimum vs moyenne des per-fold)
+    # Seuil PR-F1-optimal calcule sur les probas OOF (maximise F1 weighted,
+    # favorise la classe majoritaire RP donc seuil tres haut ~0.88).
     from sklearn.metrics import precision_recall_curve as _prc
     _y_true_arr = np.array(y_true_all)
     _y_proba_arr = np.array(y_proba_all)
@@ -231,7 +232,23 @@ def main() -> None:
     _best = int(np.argmax(_f1s[:-1])) if len(_f1s) > 1 else 0
     threshold_pr_optimal = float(_t[_best]) if _best < len(_t) else 0.5
     payload["cv5"]["threshold_pr_optimal"] = threshold_pr_optimal
-    print(f"\n  Seuil PR-optimal sur OOF : {threshold_pr_optimal:.4f}")
+
+    # Seuil "balanced" : maximise (recall_RP + recall_RS) / 2 sur OOF.
+    # Plus equitable entre les deux classes, typiquement proche de 0.5.
+    # C'est le defaut utilise par la page (UX : utilisateur voit deja un bon
+    # equilibre avant de toucher le slider).
+    _candidates = np.linspace(0.01, 0.99, 99)
+    _bal_scores = []
+    for thr in _candidates:
+        pred = (_y_proba_arr >= thr).astype(int)
+        rec_rp = ((pred == 0) & (_y_true_arr == 0)).sum() / max((_y_true_arr == 0).sum(), 1)
+        rec_rs = ((pred == 1) & (_y_true_arr == 1)).sum() / max((_y_true_arr == 1).sum(), 1)
+        _bal_scores.append((rec_rp + rec_rs) / 2)
+    threshold_balanced = float(_candidates[int(np.argmax(_bal_scores))])
+    payload["cv5"]["threshold_balanced"] = threshold_balanced
+
+    print(f"\n  Seuil PR-F1-optimal : {threshold_pr_optimal:.4f} (max F1 weighted, favorise RP)")
+    print(f"  Seuil balanced       : {threshold_balanced:.4f} (equilibre recall RP/RS, defaut UI)")
 
     # OOF predictions : permet a la page Streamlit de recomputer les metriques
     # pour n'importe quel seuil sans refitter le modele (slider interactif).
