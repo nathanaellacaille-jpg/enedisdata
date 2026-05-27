@@ -12,14 +12,25 @@ from utils.features import extract_features
 
 
 @st.cache_data
-def _load_baseline_metrics() -> dict | None:
-    """Charge les metriques baseline (CV5 pre-calcule par scripts/phase0_diagnostic.py)."""
+def _load_baseline_inner(path_str: str, mtime: float, size: int) -> dict | None:
+    """Charge le JSON depuis disque (cache invalide quand mtime/size change)."""
     import json
+    with open(path_str, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _load_baseline_metrics() -> dict | None:
+    """Charge les metriques baseline (CV5 pre-calcule par scripts/phase0_diagnostic.py).
+
+    Pass mtime+size en argument pour invalider le cache automatiquement
+    quand le fichier change sur Cloud (sans ca, le cache @st.cache_data garde
+    l'ancien JSON en memoire apres un deploy).
+    """
     p = ROOT_DIR / "assets" / "baseline_metrics.json"
     if not p.exists():
         return None
-    with open(p, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    s = p.stat()
+    return _load_baseline_inner(str(p), s.st_mtime, s.st_size)
 
 _FEAT_LABELS = {
     "zero_ratio": "Taux d'absence",
@@ -333,48 +344,52 @@ if clf is not None and y_test is not None and y_proba_test is not None:
     st.markdown("### Performance du modele")
 
     baseline = _load_baseline_metrics()
-    if baseline is not None and "oof" in baseline:
+    if baseline is not None:
         cv5 = baseline["cv5"]
-        default_threshold = float(cv5.get("threshold_pr_optimal", 0.5))
-        threshold = threshold_override if threshold_override is not None else default_threshold
-        is_default = abs(threshold - default_threshold) < 1e-3
+        has_oof = "oof" in baseline and baseline["oof"].get("y_proba")
 
-        st.caption(
-            f"Validation croisee 5 folds sur {baseline['dataset']['n_samples']} compteurs "
-            f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS). "
-            f"Seuil de decision : **{threshold:.2f}** "
-            f"({'optimum PR sur OOF' if is_default else 'override sidebar'})."
-        )
+        if has_oof:
+            default_threshold = float(cv5.get("threshold_pr_optimal", 0.5))
+            threshold = threshold_override if threshold_override is not None else default_threshold
+            is_default = abs(threshold - default_threshold) < 1e-3
 
-        # Recompute metriques + matrice a partir des probas out-of-fold pre-calculees
-        oof_y = np.array(baseline["oof"]["y_true"])
-        oof_proba = np.array(baseline["oof"]["y_proba"])
-        oof_pred = (oof_proba >= threshold).astype(int)
-        acc = float(accuracy_score(oof_y, oof_pred))
-        f1w = float(f1_score(oof_y, oof_pred, average="weighted"))
-        rec_rs = float(recall_score(oof_y, oof_pred, pos_label=1, zero_division=0))
+            st.caption(
+                f"Validation croisee 5 folds sur {baseline['dataset']['n_samples']} compteurs "
+                f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS). "
+                f"Seuil de decision : **{threshold:.2f}** "
+                f"({'optimum PR sur OOF' if is_default else 'override sidebar'})."
+            )
+
+            oof_y = np.array(baseline["oof"]["y_true"])
+            oof_proba = np.array(baseline["oof"]["y_proba"])
+            oof_pred = (oof_proba >= threshold).astype(int)
+            acc = float(accuracy_score(oof_y, oof_pred))
+            f1w = float(f1_score(oof_y, oof_pred, average="weighted"))
+            rec_rs = float(recall_score(oof_y, oof_pred, pos_label=1, zero_division=0))
+            cm_arr = confusion_matrix(oof_y, oof_pred)
+            acc_delta = f"± {cv5['accuracy_std']:.2%}" if is_default else None
+            f1_delta = f"± {cv5['f1_weighted_std']:.2%}" if is_default else None
+            rec_delta = f"± {cv5['recall_rs_std']:.2%}" if is_default else None
+        else:
+            # Fallback : pas d'OOF dans le JSON → affiche les moyennes agregees
+            st.caption(
+                f"Validation croisee 5 folds sur {baseline['dataset']['n_samples']} compteurs "
+                f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS)."
+            )
+            acc = cv5["accuracy"]
+            f1w = cv5["f1_weighted"]
+            rec_rs = cv5["recall_rs"]
+            acc_delta = f"± {cv5['accuracy_std']:.2%}"
+            f1_delta = f"± {cv5['f1_weighted_std']:.2%}"
+            rec_delta = f"± {cv5['recall_rs_std']:.2%}"
+            conf = baseline.get("confusion", {})
+            cm_arr = np.array([[conf.get("tn", 0), conf.get("fp", 0)],
+                               [conf.get("fn", 0), conf.get("tp", 0)]])
 
         c1, c2, c3 = st.columns(3)
-        c1.metric(
-            "Precision globale",
-            f"{acc:.2%}",
-            f"± {cv5['accuracy_std']:.2%}" if is_default else None,
-            delta_color="off",
-        )
-        c2.metric(
-            "Equilibre RS / RP",
-            f"{f1w:.2%}",
-            f"± {cv5['f1_weighted_std']:.2%}" if is_default else None,
-            delta_color="off",
-        )
-        c3.metric(
-            "Detection residences secondaires",
-            f"{rec_rs:.2%}",
-            f"± {cv5['recall_rs_std']:.2%}" if is_default else None,
-            delta_color="off",
-        )
-
-        cm_arr = confusion_matrix(oof_y, oof_pred)
+        c1.metric("Precision globale", f"{acc:.2%}", acc_delta, delta_color="off")
+        c2.metric("Equilibre RS / RP", f"{f1w:.2%}", f1_delta, delta_color="off")
+        c3.metric("Detection residences secondaires", f"{rec_rs:.2%}", rec_delta, delta_color="off")
     else:
         cm_arr = confusion_matrix(y_test, y_pred)
 
