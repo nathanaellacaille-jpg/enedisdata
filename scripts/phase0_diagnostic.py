@@ -222,6 +222,25 @@ def main() -> None:
             "n_false_positives_rs": int(len(fp)),
         },
     }
+    # Seuil PR-optimal calcule sur les probas OOF (vrai optimum vs moyenne des per-fold)
+    from sklearn.metrics import precision_recall_curve as _prc
+    _y_true_arr = np.array(y_true_all)
+    _y_proba_arr = np.array(y_proba_all)
+    _p, _r, _t = _prc(_y_true_arr, _y_proba_arr)
+    _f1s = 2 * _p * _r / (_p + _r + 1e-12)
+    _best = int(np.argmax(_f1s[:-1])) if len(_f1s) > 1 else 0
+    threshold_pr_optimal = float(_t[_best]) if _best < len(_t) else 0.5
+    payload["cv5"]["threshold_pr_optimal"] = threshold_pr_optimal
+    print(f"\n  Seuil PR-optimal sur OOF : {threshold_pr_optimal:.4f}")
+
+    # OOF predictions : permet a la page Streamlit de recomputer les metriques
+    # pour n'importe quel seuil sans refitter le modele (slider interactif).
+    payload["oof"] = {
+        "meter_ids": [str(m) for m in common],
+        "y_true": [int(v) for v in y_true_all],
+        "y_proba": [float(v) for v in y_proba_all],
+    }
+
     # Permutation importance sur le pipeline entraine sur l'ensemble du dataset
     print("\n[7/7] Calcul des permutation importances (n_jobs=1 pour eviter blowup RAM)...")
     full_clf = EnergyClassifier()

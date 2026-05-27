@@ -139,6 +139,22 @@ with st.sidebar:
     else:
         selected = None
 
+    # Slider seuil decision : defaut = seuil PR-optimal CV5 du JSON baseline.
+    # Plus bas → plus de RS detectees (rappel ↑, precision ↓).
+    _baseline_for_threshold = _load_baseline_metrics()
+    if _baseline_for_threshold is not None:
+        _default_thr = float(_baseline_for_threshold["cv5"].get("threshold_pr_optimal", 0.5))
+        st.markdown("**Seuil de decision**")
+        threshold_override = st.slider(
+            "Probabilite >= seuil -> RS",
+            min_value=0.20, max_value=0.95,
+            value=_default_thr, step=0.01,
+            help="Plus bas: detecte plus de RS (rappel ↑). Plus haut: classifications plus surs (precision ↑).",
+            key="clf_threshold_slider",
+        )
+    else:
+        threshold_override = None
+
     st.markdown(
         '<div class="sidebar-footer">'
         '<div class="sidebar-badge">RES2-6-9 kVA</div><br>'
@@ -165,6 +181,9 @@ y_proba_test = None
 cv_scores = None
 if labels is not None:
     clf, X_test, y_test, y_proba_test, cv_scores = _train_model(features, labels)
+    # Surcharge le seuil par celui du slider sidebar (defaut = PR-optimal CV5).
+    if clf is not None and threshold_override is not None:
+        clf.threshold_ = threshold_override
 y_pred = (y_proba_test >= clf.threshold_).astype(int) if (clf is not None and y_proba_test is not None) else None
 
 # Predictions sur tout le dataset
@@ -314,35 +333,48 @@ if clf is not None and y_test is not None and y_proba_test is not None:
     st.markdown("### Performance du modele")
 
     baseline = _load_baseline_metrics()
-    if baseline is not None:
+    if baseline is not None and "oof" in baseline:
         cv5 = baseline["cv5"]
+        default_threshold = float(cv5.get("threshold_pr_optimal", 0.5))
+        threshold = threshold_override if threshold_override is not None else default_threshold
+        is_default = abs(threshold - default_threshold) < 1e-3
+
         st.caption(
             f"Validation croisee 5 folds sur {baseline['dataset']['n_samples']} compteurs "
-            f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS, "
-            f"calculee le {baseline['computed_at'][:10]})."
+            f"({baseline['dataset']['n_rp']} RP / {baseline['dataset']['n_rs']} RS). "
+            f"Seuil de decision : **{threshold:.2f}** "
+            f"({'optimum PR sur OOF' if is_default else 'override sidebar'})."
         )
+
+        # Recompute metriques + matrice a partir des probas out-of-fold pre-calculees
+        oof_y = np.array(baseline["oof"]["y_true"])
+        oof_proba = np.array(baseline["oof"]["y_proba"])
+        oof_pred = (oof_proba >= threshold).astype(int)
+        acc = float(accuracy_score(oof_y, oof_pred))
+        f1w = float(f1_score(oof_y, oof_pred, average="weighted"))
+        rec_rs = float(recall_score(oof_y, oof_pred, pos_label=1, zero_division=0))
+
         c1, c2, c3 = st.columns(3)
         c1.metric(
             "Precision globale",
-            f"{cv5['accuracy']:.2%}",
-            f"± {cv5['accuracy_std']:.2%}",
+            f"{acc:.2%}",
+            f"± {cv5['accuracy_std']:.2%}" if is_default else None,
             delta_color="off",
         )
         c2.metric(
             "Equilibre RS / RP",
-            f"{cv5['f1_weighted']:.2%}",
-            f"± {cv5['f1_weighted_std']:.2%}",
+            f"{f1w:.2%}",
+            f"± {cv5['f1_weighted_std']:.2%}" if is_default else None,
             delta_color="off",
         )
         c3.metric(
             "Detection residences secondaires",
-            f"{cv5['recall_rs']:.2%}",
-            f"± {cv5['recall_rs_std']:.2%}",
+            f"{rec_rs:.2%}",
+            f"± {cv5['recall_rs_std']:.2%}" if is_default else None,
             delta_color="off",
         )
 
-        conf = baseline["confusion"]
-        cm_arr = np.array([[conf["tn"], conf["fp"]], [conf["fn"], conf["tp"]]])
+        cm_arr = confusion_matrix(oof_y, oof_pred)
     else:
         cm_arr = confusion_matrix(y_test, y_pred)
 
