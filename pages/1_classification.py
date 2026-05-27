@@ -5,7 +5,7 @@ import streamlit as st
 from sklearn.metrics import confusion_matrix, recall_score, accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 
-from config import PAL, CLF_TEST_SIZE, ROOT_DIR, _make_rp_profile, _make_rs_profile
+from config import PAL, CLF_TEST_SIZE, ROOT_DIR
 from models.classifier import EnergyClassifier
 from utils.data_loader import load_default_ts, load_default_labels
 from utils.features import extract_features
@@ -344,49 +344,74 @@ fig.update_layout(
 )
 st.plotly_chart(fig, width="stretch")
 
-# Explication : profil + facteurs (necessite le modele)
-if clf is not None and not meter_feat.empty:
+# Timeline d'occupation : visualise les VRAIS signaux qui discriminent RS/RP
+# (absences, jours actifs, ratio saisonnier). Plus utile que le profil 24h
+# qui ne contribue quasi pas a la decision du modele.
+if not meter_df.empty:
     st.markdown("---")
-    st.markdown("### Profil de consommation")
+    st.markdown("### Timeline d'occupation")
 
-    rp_ref = _make_rp_profile()
-    rs_ref = _make_rs_profile()
-    meter_profile = meter_df.copy()
-    meter_profile["slot"] = meter_profile["ts"].dt.hour * 2 + meter_profile["ts"].dt.minute // 30
-    mp = meter_profile.groupby("slot")["kw"].mean().reindex(range(48), fill_value=0.0).values
-    if mp.max() > 0:
-        mp = mp / mp.max()
+    _daily = meter_df.groupby(meter_df["ts"].dt.date)["kw"].sum() * 0.5
+    _daily.index = pd.to_datetime(_daily.index)
+    _daily = _daily.sort_index()
 
-    slots = list(range(48))
-    fig_radar = go.Figure()
-    tick_vals = list(range(0, 48, 4))
-    tick_text = [f"{h}h" for h in range(0, 24, 2)]
-    fig_radar.add_trace(go.Scatter(
-        x=slots, y=mp, mode="lines", name="Compteur",
-        line=dict(color=PAL.ACCENT[0], width=2.8),
+    # Seuil d'absence : 0.5 kWh/jour (meme valeur que dans features.py)
+    _absent = _daily < 0.5
+    _active_pct = float((~_absent).mean() * 100) if len(_daily) > 0 else 0.0
+    _n_absent = int(_absent.sum())
+
+    # Detection longue absence consecutive (max gap days)
+    _max_gap = 0
+    _cur = 0
+    _gap_end_idx = -1
+    for i, v in enumerate(_absent.values):
+        if v:
+            _cur += 1
+            if _cur > _max_gap:
+                _max_gap = _cur
+                _gap_end_idx = i
+        else:
+            _cur = 0
+    _max_gap_start_date = _daily.index[_gap_end_idx - _max_gap + 1] if _gap_end_idx >= 0 and _max_gap > 0 else None
+    _max_gap_end_date = _daily.index[_gap_end_idx] if _gap_end_idx >= 0 else None
+
+    # KPI compacts au-dessus du graphique
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Jours actifs", f"{_active_pct:.0f} %", delta_color="off")
+    k2.metric("Jours absents", str(_n_absent), delta_color="off")
+    k3.metric("Plus longue absence", f"{_max_gap} j", delta_color="off")
+
+    # Bar chart par jour : couleur differente actif vs absent
+    colors = [PAL.ACCENT[0] if not a else "#E2E8F0" for a in _absent.values]
+    fig_tl = go.Figure(go.Bar(
+        x=_daily.index, y=_daily.values,
+        marker_color=colors,
+        hovertemplate="%{x|%d %b %Y} : %{y:.1f} kWh<extra></extra>",
     ))
-    fig_radar.add_trace(go.Scatter(
-        x=slots, y=rp_ref, mode="lines", name="Ref residence principale (RP)",
-        line=dict(color=PAL.ACCENT[1], width=1.8, dash="dash"),
-    ))
-    fig_radar.add_trace(go.Scatter(
-        x=slots, y=rs_ref, mode="lines", name="Ref residence secondaire (RS)",
-        line=dict(color=PAL.ACCENT[2], width=1.8, dash="dot"),
-    ))
-    _radar_layout = {
+    if _max_gap_start_date is not None and _max_gap >= 7:
+        # Highlight bandeau pour les longues absences (>= 1 semaine)
+        fig_tl.add_vrect(
+            x0=_max_gap_start_date, x1=_max_gap_end_date,
+            fillcolor="#FCA5A5", opacity=0.15, layer="below", line_width=0,
+            annotation_text=f"Absence {_max_gap}j",
+            annotation_position="top left",
+            annotation=dict(font=dict(size=10, color=PAL.TEXT_MUTED)),
+        )
+    fig_tl.update_layout(
         **_plotly_base(),
-        "margin": dict(l=16, r=16, t=32, b=16),
-        "title": "Profil de consommation vs references",
-        "yaxis_title": "Puissance (normalisee)",
-        "xaxis": dict(
-            gridcolor="#F1F5F9", linecolor=PAL.BORDER,
-            tickfont=dict(size=11, color=PAL.TEXT_MUTED),
-            tickvals=tick_vals, ticktext=tick_text,
-        ),
-    }
-    fig_radar.update_layout(**_radar_layout)
-    st.plotly_chart(fig_radar, width="stretch")
+        margin=dict(l=16, r=16, t=8, b=16),
+        yaxis_title="Energie quotidienne (kWh)",
+        showlegend=False,
+        height=240,
+    )
+    st.plotly_chart(fig_tl, width="stretch")
+    st.caption(
+        "Bleu : jours actifs (≥ 0.5 kWh). Gris : jours absents. "
+        "Surlignage : plus longue periode d'absence consecutive. "
+        "Les RS se distinguent typiquement par des absences saisonnieres prolongees."
+    )
 
+if clf is not None and not meter_feat.empty:
     baseline_imp = _load_baseline_metrics()
     if baseline_imp and "feature_importances_top10" in baseline_imp:
         st.markdown("---")
