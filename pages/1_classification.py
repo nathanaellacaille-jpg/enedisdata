@@ -327,26 +327,8 @@ if not proba_series.empty and selected in proba_series.index:
 else:
     st.caption("Chargez des labels pour obtenir la classification.")
 
-st.markdown("---")
-
-# Courbe de charge
-st.markdown("### Courbe de charge")
-fig = go.Figure()
-fig.add_trace(go.Scatter(
-    x=meter_df["ts"], y=meter_df["kw"],
-    mode="lines", name="Puissance (kW)",
-    line=dict(color=PAL.ACCENT[0], width=1.5),
-))
-fig.update_layout(
-    **_plotly_base(),
-    margin=dict(l=16, r=16, t=32, b=16),
-    yaxis_title="kW",
-)
-st.plotly_chart(fig, width="stretch")
-
 # Timeline d'occupation : visualise les VRAIS signaux qui discriminent RS/RP
-# (absences, jours actifs, ratio saisonnier). Plus utile que le profil 24h
-# qui ne contribue quasi pas a la decision du modele.
+# (absences, jours actifs, ratio saisonnier).
 if not meter_df.empty:
     st.markdown("---")
     st.markdown("### Timeline d'occupation")
