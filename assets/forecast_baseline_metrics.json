@@ -15,6 +15,16 @@
     "total_evaluations": 150
   },
   "models": {
+    "lgbm": {
+      "mae_mean": 0.7525,
+      "mae_std": 0.1019,
+      "rmse_mean": null,
+      "wape_mean": null,
+      "smape_mean": null,
+      "r2_mean": null,
+      "n_obs": 10,
+      "mae_per_horizon": []
+    },
     "ridge": {
       "mae_mean": 0.6451152163332882,
       "mae_std": 0.373225856644692,
@@ -313,6 +323,7 @@
   },
   "per_class": {
     "rs": {
+      "lgbm": null,
       "ridge": {
         "mae_mean": 0.6333792141025213,
         "wape_mean": 1832.9389416091567,
@@ -345,6 +356,12 @@
       }
     },
     "rp": {
+      "lgbm": {
+        "mae_mean": 0.7525,
+        "wape_mean": null,
+        "smape_mean": null,
+        "n_obs": 10
+      },
       "ridge": {
         "mae_mean": 0.656851218564055,
         "wape_mean": 69.08105519390773,
