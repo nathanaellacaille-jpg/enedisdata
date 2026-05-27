@@ -159,7 +159,7 @@ meter_df = df[df["meter_id"] == selected].sort_values("ts").reset_index(drop=Tru
 series = meter_df["kw"].values.astype(float)
 ts_index = meter_df["ts"].values
 
-_MIN_PTS = LGBM_V2_LOOKBACK + STEPS_PER_DAY + FCST_HORIZON_H * 2
+_MIN_PTS = LGBM_V2_LOOKBACK + STEPS_PER_DAY * 2 + FCST_HORIZON_H * 2
 if len(series) < _MIN_PTS:
     min_days = _MIN_PTS // STEPS_PER_DAY + 1
     st.warning(f"Serie trop courte pour la prevision (minimum {min_days} jours).")
