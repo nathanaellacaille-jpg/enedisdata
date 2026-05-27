@@ -79,6 +79,10 @@ class CurveGenerator:
             if sub.empty:
                 continue
             sub = sub.copy()
+            # pandas 3.0 : retire le dtype categorical sur la copie locale.
+            # Sinon les .loc[list] sur MultiIndex (meter_id_cat, ...) levent KeyError.
+            # df original garde son dtype categorical (optim RAM x60 preservee).
+            sub["meter_id"] = sub["meter_id"].astype(str)
             sub["slot"] = sub["ts"].dt.hour * 2 + sub["ts"].dt.minute // 30
             sub["date"] = sub["ts"].dt.date
 
@@ -92,13 +96,15 @@ class CurveGenerator:
             meter_energy = daily_stats.groupby("meter_id")["energy"].median()
             # On normalise toujours par le pic-of-slot-means pour la forme (lisse, robuste)
             meter_peaks_smooth = slot_means.groupby("meter_id").max()
-            valid = meter_peaks_smooth[
+            valid_idx = meter_peaks_smooth[
                 (meter_peaks_smooth > 0)
                 & (meter_peaks_daily.reindex(meter_peaks_smooth.index) > 0)
                 & (meter_energy.reindex(meter_peaks_smooth.index) > 0)
             ].index
-            if valid.empty:
+            if valid_idx.empty:
                 continue
+            # pandas 3.0 refuse .loc[CategoricalIndex] sur niveau MultiIndex : on convertit en list.
+            valid = list(valid_idx)
             meter_peaks = meter_peaks_smooth  # alias conserve pour la suite
 
             # Tableau (n_compteurs × 48) des profils normalisés au pic de chaque compteur
@@ -106,7 +112,7 @@ class CurveGenerator:
                 slot_means.loc[valid]
                 .unstack("slot")
                 .reindex(columns=range(STEPS_PER_DAY), fill_value=0.0)
-                .div(meter_peaks[valid], axis=0)
+                .div(meter_peaks.loc[valid], axis=0)
                 .values
             )  # shape (n_valid, 48), valeurs dans [0, 1]
 
@@ -121,8 +127,8 @@ class CurveGenerator:
             # moyen-temporel). Le plancher (~1 % du pic) modelise la consommation
             # toujours allumee → evite la sur-occurrence de slots a zero.
             FLOOR = 0.01
-            median_peak = float(np.median(meter_peaks_daily[valid].values))
-            median_energy = float(np.median(meter_energy[valid].values))
+            median_peak = float(np.median(meter_peaks_daily.loc[valid].values))
+            median_energy = float(np.median(meter_energy.loc[valid].values))
             target_sum_half = median_energy / max(median_peak, 1e-9)
             alpha_grid = np.linspace(0.5, 25.0, 246)
 
@@ -146,7 +152,7 @@ class CurveGenerator:
 
             # Scale calibre sur l'energie (apres sharpening), log-normal sur energies
             profile_sum_half = float(self._profiles[label_name].sum() * 0.5)
-            required_scales = meter_energy[valid].values / max(profile_sum_half, 1e-9)
+            required_scales = meter_energy.loc[valid].values / max(profile_sum_half, 1e-9)
             self._scales[label_name] = float(np.median(required_scales))
             self._scale_log_std[label_name] = float(
                 np.clip(np.std(np.log(required_scales + 1e-9)), 0.05, 1.5)
@@ -316,6 +322,8 @@ class CurveGenerator:
             return report
 
         sub = sub.copy()
+        # pandas 3.0 : retire le dtype categorical sur la copie locale (cf fit() comment)
+        sub["meter_id"] = sub["meter_id"].astype(str)
         sub["slot"] = sub["ts"].dt.hour * 2 + sub["ts"].dt.minute // 30
         sub["date"] = sub["ts"].dt.date
         sub["dow"] = sub["ts"].dt.dayofweek
