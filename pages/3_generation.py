@@ -121,7 +121,9 @@ lbl_key = "default_lbl"
 curve_type = st.radio("Type", ["RS", "RP"], horizontal=True, key="gen_type")
 
 N_DAYS = 7
-gen_df = _generate(ts_key, lbl_key, 50, curve_type, N_DAYS, real_df, labels, "bootstrap")
+# 300 courbes pour le report (distributions stables, faible variance d'echantillonnage) ;
+# le graphique principal n'affiche que 50 vraies courbes (main_df).
+gen_df = _generate(ts_key, lbl_key, 300, curve_type, N_DAYS, real_df, labels, "bootstrap")
 main_df = _sample_real_curves(ts_key, lbl_key, real_df, labels, curve_type, 50, N_DAYS)
 
 
