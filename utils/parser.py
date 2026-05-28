@@ -81,12 +81,6 @@ def parse_labels(file) -> dict:
     return dict(zip(df["id"], df["label"]))
 
 
-def load_timeseries_to_session(upload_key: str = "ts_file") -> "pd.DataFrame | None":
-    """Charge le CSV uploade dans session_state et le retourne."""
-    import streamlit as st
-    return st.session_state.get("_ts_df")
-
-
 def _detect_sep(sample: str) -> str:
     """Detecte le separateur CSV parmi ; , tabulation."""
     counts = {";": sample.count(";"), ",": sample.count(","), "\t": sample.count("\t")}

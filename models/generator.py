@@ -34,14 +34,22 @@ def _discriminative_score(real_daily: np.ndarray, gen_daily: np.ndarray) -> "flo
         return None
 
 
-def _filter_corpus(arr: np.ndarray, ep_limit: float) -> np.ndarray:
-    """Garde les journees avec ratio energie/pic < ep_limit et pic positif."""
+def _filter_corpus(arr: np.ndarray, target_ep: float, tol: float = 0.5) -> np.ndarray:
+    """Filtre symetrique autour de target_ep : garde ep ∈ [(1-tol)*target, (1+tol)*target].
+
+    Centre la distribution des ratios energie/pic sur target_ep pour que
+    mean(corpus_ep_ratio) ≈ target_ep, ce qui aligne energie_gen sur le reel.
+    Fallback peak>0 si trop peu de profils restent (corpus trop petit).
+    """
     if len(arr) == 0:
         return arr
     peaks = arr.max(axis=1)
     ep = arr.sum(axis=1) * 0.5 / np.maximum(peaks, 1e-9)
-    mask = (peaks > 0) & (ep < ep_limit)
-    return arr[mask] if mask.any() else arr[peaks > 0]
+    low, high = (1.0 - tol) * target_ep, (1.0 + tol) * target_ep
+    mask = (peaks > 0) & (ep > low) & (ep < high)
+    if mask.sum() < max(10, int(0.2 * (peaks > 0).sum())):
+        return arr[peaks > 0]
+    return arr[mask]
 
 
 class CurveGenerator:
@@ -127,11 +135,6 @@ class CurveGenerator:
             valid = list(valid_idx)
             meter_peaks = meter_peaks_smooth  # alias conserve pour la suite
 
-            # Bootstrap : reutilise la distribution de scale (calibree sur energie/profil shape)
-            # Le corpus filtre ci-dessous aligne le ratio e/p corpus sur le ratio cible
-            self._bootstrap_log_mean[label_name] = float(np.log(max(self._scales[label_name], 1e-9)))
-            self._bootstrap_log_std[label_name] = float(self._scale_log_std[label_name])
-
             # Tableau (n_compteurs × 48) des profils normalisés au pic de chaque compteur
             norm_matrix = (
                 slot_means.loc[valid]
@@ -209,7 +212,24 @@ class CurveGenerator:
                 GEN_NOISE_STD * rel_pattern.values, 0.0, noise_cap
             )
 
-            # Profils journaliers individuels pour le mode bootstrap (n_jours × 48 kW)
+            # Stats per-pair (meter_id, date) ALIGNEES sur les metriques du similarity_report :
+            # report mesure peak_real=median(tous les pics journaliers) et
+            # mean_energy_real=mean(toutes les energies journalieres). On calibre dessus
+            # (et non sur les medianes par compteur, biaisees : median de medianes != median global).
+            mask_valid = daily_stats.index.get_level_values("meter_id").isin(set(valid))
+            pp = daily_stats[mask_valid]
+            pp = pp[pp["peak"] > 0]
+            target_peak = float(pp["peak"].median())
+            target_ep = float(pp["energy"].mean()) / max(target_peak, 1e-9)
+
+            # Bootstrap : distribution log-normale des pics journaliers per-pair.
+            # target_energy dans generate_bootstrap = pic tire ici -> peak_gen ≈ target_peak.
+            log_pks = np.log(pp["peak"].values + 1e-9)
+            self._bootstrap_log_mean[label_name] = float(np.median(log_pks))
+            self._bootstrap_log_std[label_name] = float(np.clip(np.std(log_pks), 0.05, 0.8))
+
+            # Profils journaliers individuels pour le mode bootstrap (n_jours × 48 kW),
+            # filtres symetriquement pour que mean(corpus_ep) ≈ target_ep -> energie_gen correcte
             dp = (
                 sub[sub["meter_id"].isin(valid)]
                 .pivot_table(
@@ -219,12 +239,7 @@ class CurveGenerator:
                 .dropna()
                 .values.astype(np.float32)
             )
-            # Ratio e/p cible : calibre sur les medianes par compteur
-            target_ep = (
-                float(meter_energy.loc[valid].median())
-                / max(float(meter_peaks_daily.loc[valid].median()), 1e-9)
-            )
-            self._corpus_daily[label_name] = _filter_corpus(dp, 2.0 * target_ep)
+            self._corpus_daily[label_name] = _filter_corpus(dp, target_ep)
 
             # Corpus conditionne par type de jour pour le bootstrap
             sub_dow = sub[sub["meter_id"].isin(valid)].copy()
@@ -241,7 +256,7 @@ class CurveGenerator:
                     .dropna()
                     .values.astype(np.float32)
                 )
-                getattr(self, attr)[label_name] = _filter_corpus(arr, 2.0 * target_ep)
+                getattr(self, attr)[label_name] = _filter_corpus(arr, target_ep)
 
         return self
 
