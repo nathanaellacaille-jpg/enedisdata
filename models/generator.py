@@ -57,6 +57,16 @@ class CurveGenerator:
             "RP": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
             "RS": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
         }
+        self._corpus_wd: dict[str, np.ndarray] = {
+            "RP": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
+            "RS": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
+        }
+        self._corpus_we: dict[str, np.ndarray] = {
+            "RP": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
+            "RS": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
+        }
+        self._bootstrap_log_mean: dict[str, float] = {"RP": 0.0, "RS": 0.0}
+        self._bootstrap_log_std: dict[str, float] = {"RP": 0.3, "RS": 0.3}
 
     def fit(self, df: pd.DataFrame, labels: dict | None) -> "CurveGenerator":
         """Calibre profils, scale et bruit par classe sur donnees reelles.
@@ -106,6 +116,11 @@ class CurveGenerator:
             # pandas 3.0 refuse .loc[CategoricalIndex] sur niveau MultiIndex : on convertit en list.
             valid = list(valid_idx)
             meter_peaks = meter_peaks_smooth  # alias conserve pour la suite
+
+            # Log-normal energie journaliere pour la calibration du bootstrap
+            log_e = np.log(meter_energy.loc[valid].values + 1e-9)
+            self._bootstrap_log_mean[label_name] = float(np.median(log_e))
+            self._bootstrap_log_std[label_name] = float(np.clip(np.std(log_e), 0.05, 1.5))
 
             # Tableau (n_compteurs × 48) des profils normalisés au pic de chaque compteur
             norm_matrix = (
@@ -195,6 +210,26 @@ class CurveGenerator:
                 .values.astype(np.float32)
             )
             self._corpus_daily[label_name] = dp[dp.max(axis=1) > 0]
+
+            # Corpus conditionne par type de jour pour le bootstrap
+            sub_dow = sub[sub["meter_id"].isin(valid)].copy()
+            sub_dow["dow"] = sub_dow["ts"].dt.dayofweek
+            date_dow_map = sub_dow.groupby("date")["dow"].first()
+            for attr, dates in [
+                ("_corpus_wd", set(date_dow_map[date_dow_map < 5].index)),
+                ("_corpus_we", set(date_dow_map[date_dow_map >= 5].index)),
+            ]:
+                arr = (
+                    sub_dow[sub_dow["date"].isin(dates)]
+                    .pivot_table(index=["meter_id", "date"], columns="slot", values="kw", aggfunc="mean")
+                    .reindex(columns=range(STEPS_PER_DAY), fill_value=0.0)
+                    .dropna()
+                    .values.astype(np.float32)
+                )
+                getattr(self, attr)[label_name] = (
+                    arr[arr.max(axis=1) > 0] if len(arr) > 0
+                    else np.empty((0, STEPS_PER_DAY), dtype=np.float32)
+                )
 
         return self
 
@@ -407,10 +442,10 @@ class CurveGenerator:
         return df.sort_values(["meter_id", "ts"]).reset_index(drop=True), labels
 
     def generate_bootstrap(self, n: int, curve_type: str, n_days: int = 7, noise_std: float = GEN_NOISE_STD) -> pd.DataFrame:
-        """Genere n courbes par reechantillonnage depuis les profils journaliers stockes par fit().
+        """Genere n courbes par reechantillonnage conditionne par type de jour.
 
-        Chaque journee est tiree aleatoirement depuis le corpus de profils reels ou synthetiques,
-        puis rescalee avec une amplitude log-normale et perturbee par bruit AR(1).
+        Chaque journee est tiree depuis le corpus weekday ou weekend selon day % 7,
+        normalisee par son energie puis rescalee par amplitude log-normale empirique.
         Bascule sur generate() si le corpus est vide pour le type demande.
         """
         noise_ratio = noise_std / max(GEN_NOISE_STD, 1e-9)
@@ -427,16 +462,22 @@ class CurveGenerator:
                     })
                 continue
             slot_stds = self.noise_std_by_slot[ct] * noise_ratio
-            log_mean = np.log(max(self._scales[ct], 1e-9))
-            scale = float(np.clip(
-                np.exp(np.random.normal(log_mean, self._scale_log_std[ct])),
-                self._scales[ct] * 0.05,
-                self._scales[ct] * 8.0,
+            log_mean_e = self._bootstrap_log_mean[ct]
+            log_std_e = self._bootstrap_log_std[ct]
+            median_e = float(np.exp(log_mean_e))
+            target_energy = float(np.clip(
+                np.exp(np.random.normal(log_mean_e, log_std_e)),
+                median_e * 0.05, median_e * 8.0,
             ))
             for day in range(n_days):
-                raw_profile = corpus[np.random.randint(len(corpus))]
-                peak = float(raw_profile.max())
-                profile = (raw_profile / peak) if peak > 0 else np.zeros(STEPS_PER_DAY, dtype=np.float32)
+                is_we = (day % 7) >= 5
+                corp_day = self._corpus_we.get(ct) if is_we else self._corpus_wd.get(ct)
+                if corp_day is None or len(corp_day) == 0:
+                    corp_day = corpus
+                raw_profile = corp_day[np.random.randint(len(corp_day))]
+                energy = float(raw_profile.sum() * 0.5)
+                profile = raw_profile / energy if energy > 0 else np.zeros(STEPS_PER_DAY, dtype=np.float32)
+                max_kw = float(profile.max()) * target_energy * 4.0
                 day_factor = float(np.clip(1.0 + np.random.normal(0, noise_std * 0.3), 0.3, 2.0))
                 ar_noise = np.zeros(STEPS_PER_DAY)
                 ar_noise[0] = np.random.normal(0, float(slot_stds[0]))
@@ -446,10 +487,10 @@ class CurveGenerator:
                         0, float(slot_stds[t]) * innov_scale
                     )
                 for slot in range(STEPS_PER_DAY):
-                    raw = profile[slot] * (1.0 + ar_noise[slot]) * scale * day_factor
+                    raw = profile[slot] * target_energy * day_factor * (1.0 + ar_noise[slot])
                     records.append({
                         "curve_id": i, "day": day, "slot": slot,
-                        "kw": float(np.clip(raw, 0.0, scale * 4.0)),
+                        "kw": float(np.clip(raw, 0.0, max_kw)),
                         "curve_type": ct,
                     })
         return pd.DataFrame(records)
