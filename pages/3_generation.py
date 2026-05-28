@@ -50,6 +50,45 @@ def _generate(ts_key: str, lbl_key: str, n: int, curve_type: str, n_days: int,
     return gen.generate(n, curve_type, n_days, GEN_NOISE_STD)
 
 
+@st.cache_data
+def _sample_real_curves(
+    ts_key: str,
+    lbl_key: str,
+    _df: pd.DataFrame,
+    _labels: dict,
+    curve_type: str,
+    n: int,
+    n_days: int,
+) -> pd.DataFrame:
+    """Tire n meters reels aleatoirement et extrait leurs n_days derniers jours connus."""
+    label_val = 1 if curve_type == "RS" else 0
+    ids = [k for k, v in _labels.items() if v == label_val]
+    meter_set = set(_df["meter_id"].astype(str).unique())
+    available = [m for m in ids if m in meter_set]
+    if not available:
+        return pd.DataFrame(columns=["curve_id", "day", "slot", "kw", "curve_type"])
+    rng = np.random.default_rng(42)
+    sampled = list(rng.choice(available, size=min(n, len(available)), replace=False))
+    sub = _df[_df["meter_id"].isin(sampled)].copy()
+    sub["meter_id"] = sub["meter_id"].astype(str)
+    sub["date"] = sub["ts"].dt.date
+    sub["slot"] = sub["ts"].dt.hour * 2 + sub["ts"].dt.minute // 30
+    parts = []
+    for curve_id, mid in enumerate(sampled):
+        msub = sub[sub["meter_id"] == mid]
+        dates = sorted(msub["date"].unique())[-n_days:]
+        for day_idx, date in enumerate(dates):
+            dsub = msub[msub["date"] == date][["slot", "kw"]].copy()
+            dsub["curve_id"] = curve_id
+            dsub["day"] = day_idx
+            dsub["curve_type"] = curve_type
+            parts.append(dsub)
+    if not parts:
+        return pd.DataFrame(columns=["curve_id", "day", "slot", "kw", "curve_type"])
+    result = pd.concat(parts, ignore_index=True)
+    return result[["curve_id", "day", "slot", "kw", "curve_type"]]
+
+
 # ── sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -93,17 +132,22 @@ curve_type = st.radio("Type", ["RS", "RP"], horizontal=True, key="gen_type")
 
 N_DAYS = 7
 gen_df = _generate(ts_key, lbl_key, 50, curve_type, N_DAYS, real_df, labels, "bootstrap")
+main_df = (
+    _sample_real_curves(ts_key, lbl_key, real_df, labels, curve_type, 50, N_DAYS)
+    if has_real
+    else gen_df
+)
 
 
 # ── graphique principal : N courbes sur 7 jours ──────────────────────────────
 
-gen_df_sorted = gen_df.sort_values(["curve_id", "day", "slot"]).copy()
-gen_df_sorted["t"] = gen_df_sorted["day"] * STEPS_PER_DAY + gen_df_sorted["slot"]
+main_df_sorted = main_df.sort_values(["curve_id", "day", "slot"]).copy()
+main_df_sorted["t"] = main_df_sorted["day"] * STEPS_PER_DAY + main_df_sorted["slot"]
 total_slots = N_DAYS * STEPS_PER_DAY
 
 fig_main = go.Figure()
-for cid in sorted(gen_df_sorted["curve_id"].unique()):
-    c = gen_df_sorted[gen_df_sorted["curve_id"] == cid]
+for cid in sorted(main_df_sorted["curve_id"].unique()):
+    c = main_df_sorted[main_df_sorted["curve_id"] == cid]
     fig_main.add_trace(go.Scatter(
         x=c["t"], y=c["kw"],
         mode="lines", showlegend=False,
@@ -111,19 +155,25 @@ for cid in sorted(gen_df_sorted["curve_id"].unique()):
         hoverinfo="skip",
     ))
 
-mean_curve = gen_df_sorted.groupby("t")["kw"].mean()
+mean_curve = main_df_sorted.groupby("t")["kw"].mean()
+_mean_label = "Moyenne des courbes reelles" if has_real else "Moyenne des courbes generees"
 fig_main.add_trace(go.Scatter(
     x=mean_curve.index, y=mean_curve.values,
-    mode="lines", name="Moyenne des courbes generees",
+    mode="lines", name=_mean_label,
     line=dict(color=PAL.ACCENT[0], width=2),
 ))
 
 day_ticks = list(range(0, total_slots, STEPS_PER_DAY))
 day_labels = [f"J{d + 1}" for d in range(N_DAYS)]
+_main_title = (
+    f"50 courbes {curve_type} reelles — 7 derniers jours"
+    if has_real
+    else f"50 courbes {curve_type} generees — 7 jours"
+)
 fig_main.update_layout(
     **_plotly_base(),
     margin=dict(l=16, r=16, t=32, b=16),
-    title=f"50 courbes {curve_type} sur 7 jours (pas 30 min)",
+    title=_main_title,
     yaxis_title="Puissance (kW)",
     height=380,
 )
