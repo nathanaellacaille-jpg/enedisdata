@@ -34,22 +34,14 @@ def _discriminative_score(real_daily: np.ndarray, gen_daily: np.ndarray) -> "flo
         return None
 
 
-def _filter_corpus(arr: np.ndarray, target_ep: float, tol: float = 0.5) -> np.ndarray:
-    """Filtre symetrique autour de target_ep : garde ep ∈ [(1-tol)*target, (1+tol)*target].
-
-    Centre la distribution des ratios energie/pic sur target_ep pour que
-    mean(corpus_ep_ratio) ≈ target_ep, ce qui aligne energie_gen sur le reel.
-    Fallback peak>0 si trop peu de profils restent (corpus trop petit).
-    """
+def _filter_corpus(arr: np.ndarray) -> np.ndarray:
+    """Retire les journees a pic nul. Le bootstrap echantillonne les profils reels
+    tels quels (kW bruts), donc aucun filtrage de ratio energie/pic n'est requis :
+    le couple (pic, energie) reel est preserve par construction."""
     if len(arr) == 0:
         return arr
     peaks = arr.max(axis=1)
-    ep = arr.sum(axis=1) * 0.5 / np.maximum(peaks, 1e-9)
-    low, high = (1.0 - tol) * target_ep, (1.0 + tol) * target_ep
-    mask = (peaks > 0) & (ep > low) & (ep < high)
-    if mask.sum() < max(10, int(0.2 * (peaks > 0).sum())):
-        return arr[peaks > 0]
-    return arr[mask]
+    return arr[peaks > 0]
 
 
 class CurveGenerator:
@@ -83,8 +75,6 @@ class CurveGenerator:
             "RP": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
             "RS": np.empty((0, STEPS_PER_DAY), dtype=np.float32),
         }
-        self._bootstrap_log_mean: dict[str, float] = {"RP": 0.0, "RS": 0.0}
-        self._bootstrap_log_std: dict[str, float] = {"RP": 0.3, "RS": 0.3}
 
     def fit(self, df: pd.DataFrame, labels: dict | None) -> "CurveGenerator":
         """Calibre profils, scale et bruit par classe sur donnees reelles.
@@ -212,24 +202,8 @@ class CurveGenerator:
                 GEN_NOISE_STD * rel_pattern.values, 0.0, noise_cap
             )
 
-            # Stats per-pair (meter_id, date) ALIGNEES sur les metriques du similarity_report :
-            # report mesure peak_real=median(tous les pics journaliers) et
-            # mean_energy_real=mean(toutes les energies journalieres). On calibre dessus
-            # (et non sur les medianes par compteur, biaisees : median de medianes != median global).
-            mask_valid = daily_stats.index.get_level_values("meter_id").isin(set(valid))
-            pp = daily_stats[mask_valid]
-            pp = pp[pp["peak"] > 0]
-            target_peak = float(pp["peak"].median())
-            target_ep = float(pp["energy"].mean()) / max(target_peak, 1e-9)
-
-            # Bootstrap : distribution log-normale des pics journaliers per-pair.
-            # target_energy dans generate_bootstrap = pic tire ici -> peak_gen ≈ target_peak.
-            log_pks = np.log(pp["peak"].values + 1e-9)
-            self._bootstrap_log_mean[label_name] = float(np.median(log_pks))
-            self._bootstrap_log_std[label_name] = float(np.clip(np.std(log_pks), 0.05, 0.8))
-
-            # Profils journaliers individuels pour le mode bootstrap (n_jours × 48 kW),
-            # filtres symetriquement pour que mean(corpus_ep) ≈ target_ep -> energie_gen correcte
+            # Profils journaliers individuels pour le mode bootstrap (n_jours × 48 kW).
+            # Echantillonnes tels quels par generate_bootstrap -> (pic, energie) reels preserves.
             dp = (
                 sub[sub["meter_id"].isin(valid)]
                 .pivot_table(
@@ -239,7 +213,7 @@ class CurveGenerator:
                 .dropna()
                 .values.astype(np.float32)
             )
-            self._corpus_daily[label_name] = _filter_corpus(dp, target_ep)
+            self._corpus_daily[label_name] = _filter_corpus(dp)
 
             # Corpus conditionne par type de jour pour le bootstrap
             sub_dow = sub[sub["meter_id"].isin(valid)].copy()
@@ -256,7 +230,7 @@ class CurveGenerator:
                     .dropna()
                     .values.astype(np.float32)
                 )
-                getattr(self, attr)[label_name] = _filter_corpus(arr, target_ep)
+                getattr(self, attr)[label_name] = _filter_corpus(arr)
 
         return self
 
@@ -469,10 +443,13 @@ class CurveGenerator:
         return df.sort_values(["meter_id", "ts"]).reset_index(drop=True), labels
 
     def generate_bootstrap(self, n: int, curve_type: str, n_days: int = 7, noise_std: float = GEN_NOISE_STD) -> pd.DataFrame:
-        """Genere n courbes par reechantillonnage conditionne par type de jour.
+        """Genere n courbes par reechantillonnage direct des profils journaliers reels.
 
-        Chaque journee est tiree depuis le corpus weekday ou weekend selon day % 7,
-        normalisee par son energie puis rescalee par amplitude log-normale empirique.
+        Le profil reel est utilise tel quel (kW bruts) : le couple (pic, energie)
+        est preserve exactement, donc median(pic_gen)≈median(pic_reel) et
+        mean(energie_gen)≈mean(energie_reel) sans calibration. Seuls un facteur
+        jour (moyenne 1) et un bruit AR(1) multiplicatif (moyenne 0) sont ajoutes,
+        tous deux conservant les moyennes. Conditionne par type de jour (week/weekend).
         Bascule sur generate() si le corpus est vide pour le type demande.
         """
         noise_ratio = noise_std / max(GEN_NOISE_STD, 1e-9)
@@ -489,21 +466,12 @@ class CurveGenerator:
                     })
                 continue
             slot_stds = self.noise_std_by_slot[ct] * noise_ratio
-            log_mean_e = self._bootstrap_log_mean[ct]
-            log_std_e = self._bootstrap_log_std[ct]
-            median_e = float(np.exp(log_mean_e))
-            target_energy = float(np.clip(
-                np.exp(np.random.normal(log_mean_e, log_std_e)),
-                median_e * 0.05, median_e * 8.0,
-            ))
             for day in range(n_days):
                 is_we = (day % 7) >= 5
                 corp_day = self._corpus_we.get(ct) if is_we else self._corpus_wd.get(ct)
                 if corp_day is None or len(corp_day) == 0:
                     corp_day = corpus
                 raw_profile = corp_day[np.random.randint(len(corp_day))]
-                peak = float(raw_profile.max())
-                profile = raw_profile / peak if peak > 0 else np.zeros(STEPS_PER_DAY, dtype=np.float32)
                 day_factor = float(np.clip(1.0 + np.random.normal(0, noise_std * 0.3), 0.3, 2.0))
                 ar_noise = np.zeros(STEPS_PER_DAY)
                 ar_noise[0] = np.random.normal(0, float(slot_stds[0]))
@@ -512,11 +480,12 @@ class CurveGenerator:
                     ar_noise[t] = GEN_NOISE_RHO * ar_noise[t - 1] + np.random.normal(
                         0, float(slot_stds[t]) * innov_scale
                     )
+                peak_cap = float(raw_profile.max()) * 2.0
                 for slot in range(STEPS_PER_DAY):
-                    raw = profile[slot] * target_energy * day_factor * (1.0 + ar_noise[slot])
+                    raw = float(raw_profile[slot]) * day_factor * (1.0 + ar_noise[slot])
                     records.append({
                         "curve_id": i, "day": day, "slot": slot,
-                        "kw": float(np.clip(raw, 0.0, target_energy * 4.0)),
+                        "kw": float(np.clip(raw, 0.0, peak_cap)),
                         "curve_type": ct,
                     })
         return pd.DataFrame(records)
