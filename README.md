@@ -33,21 +33,6 @@ streamlit run app.py
 - Format attendu : CSV avec colonnes `id`, `horodate`, `valeur` (separateur `;`, `,` ou tab auto-detecte)
 - Telechargement open data : https://opendata.enedis.fr/datasets/courbes-de-charges-fictives-res2-6-9
 
-**Chargement automatique** : plus de drag-and-drop. L'app cherche le CSV dans cet ordre :
-
-1. `RES2-6-9.csv` a la racine du repo (mode local)
-2. `/tmp/enedis-data/RES2-6-9.csv` (cache disque persistant entre runs)
-3. Telechargement streame depuis `DATA_URL_TS` (defaut : GitHub Release `data-v1`)
-
-Le fichier labels `RES2-6-9-labels.csv` (~9 KB, 500 ids) est tracke directement dans git.
-
-### Configuration via variables d'environnement
-
-| Variable | Defaut | Effet |
-|---|---|---|
-| `ENEDIS_MAX_METERS` | `500` | Plafond de compteurs charges. `none` / `0` / `all` = pas de cap. Sur Streamlit Cloud le dataset n'a que 500 compteurs uniques de toute facon. |
-| `ENEDIS_TS_URL` | URL Release `data-v1` | Surcharge l'URL de fallback (heberge ailleurs). |
-
 ## Pages
 
 **Classification RS/RP** : `pages/1_classification.py`
