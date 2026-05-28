@@ -117,8 +117,8 @@ class CurveGenerator:
             valid = list(valid_idx)
             meter_peaks = meter_peaks_smooth  # alias conserve pour la suite
 
-            # Log-normal energie journaliere pour la calibration du bootstrap
-            log_e = np.log(meter_energy.loc[valid].values + 1e-9)
+            # Log-normal pic journalier pour le bootstrap (evite le biais shape parametrique/reel)
+            log_e = np.log(meter_peaks_daily.loc[valid].values + 1e-9)
             self._bootstrap_log_mean[label_name] = float(np.median(log_e))
             self._bootstrap_log_std[label_name] = float(np.clip(np.std(log_e), 0.05, 1.5))
 
@@ -475,9 +475,8 @@ class CurveGenerator:
                 if corp_day is None or len(corp_day) == 0:
                     corp_day = corpus
                 raw_profile = corp_day[np.random.randint(len(corp_day))]
-                energy = float(raw_profile.sum() * 0.5)
-                profile = raw_profile / energy if energy > 0 else np.zeros(STEPS_PER_DAY, dtype=np.float32)
-                max_kw = float(profile.max()) * target_energy * 4.0
+                peak = float(raw_profile.max())
+                profile = raw_profile / peak if peak > 0 else np.zeros(STEPS_PER_DAY, dtype=np.float32)
                 day_factor = float(np.clip(1.0 + np.random.normal(0, noise_std * 0.3), 0.3, 2.0))
                 ar_noise = np.zeros(STEPS_PER_DAY)
                 ar_noise[0] = np.random.normal(0, float(slot_stds[0]))
@@ -490,7 +489,7 @@ class CurveGenerator:
                     raw = profile[slot] * target_energy * day_factor * (1.0 + ar_noise[slot])
                     records.append({
                         "curve_id": i, "day": day, "slot": slot,
-                        "kw": float(np.clip(raw, 0.0, max_kw)),
+                        "kw": float(np.clip(raw, 0.0, target_energy * 4.0)),
                         "curve_type": ct,
                     })
         return pd.DataFrame(records)
