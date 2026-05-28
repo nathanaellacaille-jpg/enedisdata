@@ -203,8 +203,9 @@ with tab1:
                                  line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot")))
     fig.add_trace(go.Scatter(x=test_ts, y=naive_pred, mode="lines", name="Reference",
                              line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot")))
-    fig.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16),
-                      title=f"Prevision 24h — {selected}", yaxis_title="kW")
+    fig.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=72, b=16),
+                      title=dict(text=f"Prevision 24h : {selected}", y=0.98, yanchor="top", yref="container"),
+                      yaxis_title="kW")
     st.plotly_chart(fig, width="stretch")
 
 with tab2:
@@ -227,8 +228,9 @@ with tab2:
         marker_color=[PAL.ACCENT[0] if n == best else PAL.MULTI[4] for n in sorted_names],
         width=0.4,
     ))
-    fig_bar.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16),
-                          title="Erreur moyenne par modele (MAE en kW) — moins = mieux",
+    fig_bar.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=72, b=16),
+                          title=dict(text="Erreur moyenne par modele (MAE en kW), moins = mieux",
+                                     y=0.98, yanchor="top", yref="container"),
                           xaxis_title="kW")
     st.plotly_chart(fig_bar, width="stretch")
 
@@ -244,8 +246,9 @@ with tab3:
                                    name="NLinear", line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot")))
     fig_h.add_trace(go.Scatter(x=hours, y=np.abs(test_series - naive_pred), mode="lines",
                                name="Reference", line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot")))
-    fig_h.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16),
-                        title="Ecart de prevision selon l'heure",
+    fig_h.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=72, b=16),
+                        title=dict(text="Ecart de prevision selon l'heure",
+                                   y=0.98, yanchor="top", yref="container"),
                         xaxis_title="Heure de prevision", yaxis_title="Ecart (kW)")
     st.plotly_chart(fig_h, width="stretch")
 
