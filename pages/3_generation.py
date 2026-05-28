@@ -154,8 +154,9 @@ day_ticks = list(range(0, total_slots, STEPS_PER_DAY))
 day_labels = [f"J{d + 1}" for d in range(N_DAYS)]
 fig_main.update_layout(
     **_plotly_base(),
-    margin=dict(l=16, r=16, t=32, b=16),
-    title=f"50 courbes {curve_type} reelles — 7 derniers jours",
+    margin=dict(l=16, r=16, t=64, b=16),
+    title=dict(text=f"50 courbes {curve_type} reelles, 7 derniers jours",
+               y=0.98, yanchor="top", yref="container"),
     yaxis_title="Puissance (kW)",
     height=380,
 )
@@ -190,8 +191,8 @@ else:
         ))
         fig_a.update_layout(
             **_plotly_base(),
-            margin=dict(l=16, r=16, t=32, b=16),
-            title="Profil moyen sur 24 h",
+            margin=dict(l=16, r=16, t=64, b=16),
+            title=dict(text="Profil moyen sur 24 h", y=0.98, yanchor="top", yref="container"),
             xaxis_title="Heure",
             yaxis_title="kW",
             height=280,
@@ -224,8 +225,8 @@ else:
         ))
         fig_b.update_layout(
             **_plotly_base(),
-            margin=dict(l=16, r=16, t=32, b=16),
-            title="Distribution energie journaliere",
+            margin=dict(l=16, r=16, t=64, b=16),
+            title=dict(text="Distribution energie journaliere", y=0.98, yanchor="top", yref="container"),
             xaxis_title="kWh / jour",
             yaxis_title="Frequence",
             barmode="overlay",
