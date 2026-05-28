@@ -62,7 +62,7 @@ def _render_perf_banner(metrics: dict) -> None:
             rows.append({
                 "Modele": _MODEL_LABELS.get(name, name),
                 "MAE (kW)": round(m["mae_mean"], 3),
-                "RMSE (kW)": round(m.get("rmse_mean", float("nan")), 3),
+                "RMSE (kW)": round(m.get("rmse_mean") or float("nan"), 3),
                 "Bat Reference": f"{wr.get('vs_naive_weekly', 0) * 100:.0f}%" if wr else "—",
                 "Gain median": f"{wr.get('median_gain_pct', 0):+.1f}%" if wr else "—",
             })
