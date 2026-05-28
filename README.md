@@ -13,7 +13,7 @@ App deployee : https://enedisdata-pcv6jat7c92bp3fqqp494m.streamlit.app/
 ```
 app.py                  point d'entree Streamlit
 config.py               palette, constantes, chemins et URL du dataset
-utils/                  parsing, features, metriques, data_loader, corpus
+utils/                  parsing, features, metriques, data_loader
 models/                 classifier, forecaster, generator
 pages/                  3 pages Streamlit (classification, prevision, generation)
 assets/style.css        CSS global
@@ -74,8 +74,6 @@ Train/test : la derniere journee de la serie est mise de cote a l'entrainement e
 Generateur conditionnel RS/RP calibre sur les donnees reelles. Deux modes :
 - **Parametrique** : profil moyen par type + bruit AR(1) (rho=0.7) en espace normalise + facteur d'amplitude journalier log-normal
 - **Bootstrap** : reechantillonnage de slots reels par type, perturbation legere par bruit AR(1)
-
-Fallback corpus built-in (`utils/corpus.py`) si le jeu de donnees n'est pas disponible.
 
 Validation de qualite : similarite de profil (Pearson), distribution d'energie journaliere (Wasserstein), indiscernabilite (test de classification gen-vs-reel).
 

@@ -28,10 +28,9 @@ utils/
   features.py            17 features par compteur
   metrics.py             MAE, RMSE, MAPE, R2
   data_loader.py         resolution path local / cache /tmp / download URL
-  corpus.py              corpus synthetique de fallback (300 courbes x 14 jours par classe)
 models/
   classifier.py          EnergyClassifier (StandardScaler + RandomForest)
-  forecaster.py          RidgeForecaster, ARIMAForecaster, LSTMForecaster
+  forecaster.py          RidgeForecaster, LGBMForecasterV2, NLinearGlobalForecaster
   generator.py           CurveGenerator (mode parametrique + bootstrap)
 pages/
   1_classification.py
@@ -57,24 +56,13 @@ DATA_URL_TS = os.environ.get(
 STEPS_PER_DAY = 48
 
 CLF_TEST_SIZE = 0.30
-CLF_N_TREES = 300            # legacy, n'est plus utilise depuis le passage HistGBT
 
-FCST_N_LAGS = 384            # 8 jours de lags (Ridge selectionne j-1..j-8 via L2)
-FCST_N_FOURIER = 3
+FCST_N_LAGS = 192            # 4 jours de lags
+FCST_N_FOURIER = 6           # 6 harmoniques journalieres
 FCST_HORIZON_H = 24
-FCST_ARIMA_ORDER = (2, 1, 2)
-
-LSTM_SEQ_LEN = 48
-LSTM_HIDDEN = 48
-LSTM_LAYERS = 2
-LSTM_EPOCHS = 40
-LSTM_LR = 1e-3
-LSTM_BATCH_SIZE = 64
 
 GEN_NOISE_STD = 0.15
 GEN_NOISE_RHO = 0.7          # autocorrelation AR(1) du bruit
-GEN_CORPUS_N = 300           # courbes par classe dans le corpus built-in
-GEN_CORPUS_DAYS = 14
 
 _env_cap = os.environ.get("ENEDIS_MAX_METERS", "500")
 MAX_METERS_UPLOAD: int | None = None if _env_cap.lower() in ("none", "0", "all") else int(_env_cap)
@@ -202,15 +190,16 @@ def make_fourier_features(n, n_harmonics=3, period=48, offset=0) -> np.ndarray
     # periode FIXE a 48 (journaliere), conforme Taylor & McSharry (2008)
 
 class RidgeForecaster:
-    # 384 lags (8 jours) + 6 colonnes Fourier (3 harmoniques x sin/cos)
-    # Selection naturelle via regularisation L2
+    # 192 lags (4 jours) + 6 harmoniques Fourier + calendrier (one-hot dow + weekend)
+    # StandardScaler + RidgeCV, apprentissage sur le residu vs J-1
 
-class ARIMAForecaster:
-    # ordre fixe (2,1,2), pas de saisonnalite (SARIMA = piste d'amelioration)
+class LGBMForecasterV2:
+    # Direct Multi-Step : 48 LGBMRegressor (un par pas), 29 features domaine-metier
+    # (slots J-1/J-2/J-7, moyennes 7j, Fourier, calendrier), cible = residu vs J-1
 
-class LSTMForecaster:
-    # 2 couches, 48 unites cachees, 40 epochs, batch 64
-    # optionnel, active via checkbox sidebar
+class NLinearGlobalForecaster:
+    # projection lineaire MIMO pre-entrainee sur les 500 compteurs
+    # W_global (192x48) calcule par scripts/compute_nlinear_global_weights.py
 ```
 
 ## models/generator.py
@@ -231,8 +220,6 @@ class CurveGenerator:
         # pearson_profile, wasserstein_energy, mean_energy_gen/real,
         # peak_gen/real, we_ratio_gen/real, discriminative_score (LR test gen-vs-real)
 ```
-
-Fallback automatique sur `utils/corpus.py:load_builtin_corpus()` si aucune calibration disponible.
 
 ## Pages
 
@@ -263,7 +250,7 @@ Vue tabbed :
 1. **Prevision** : historique + courbes des modeles superposees, ligne de separation train/test, annotation pic d'ecart Ridge.
 2. **Resultats** : metriques par modele, verdict meilleur modele.
 3. **Precision par heure** : MAE par pas d'horizon.
-4. **Comment ca marche** : descriptions courtes Ridge / ARIMA / LSTM.
+4. **Comment ca marche** : descriptions courtes Ridge / LightGBM / NLinear / reference.
 
 Train/test split : dernier `FCST_HORIZON_H * 2 = 48` pas mis de cote pour evaluation.
 

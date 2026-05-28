@@ -41,7 +41,6 @@ PAL = Palette()
 STEPS_PER_DAY = 48
 
 CLF_TEST_SIZE = 0.30
-CLF_N_TREES = 300  # legacy : utilise par les anciens snapshots, plus reference dans le code actuel
 
 FCST_N_LAGS = 192          # 4 jours de lags (Phase 1 tuning : > 192 est marginal, < est sous-optimal)
 FCST_N_FOURIER = 6         # 6 harmoniques journalieres (audit reco #8, marginal sur prevision)
@@ -49,8 +48,6 @@ FCST_HORIZON_H = 24
 
 GEN_NOISE_STD = 0.15
 GEN_NOISE_RHO = 0.7  # autocorrélation AR(1) entre slots consécutifs
-GEN_CORPUS_N = 300    # courbes par classe dans le corpus de référence built-in
-GEN_CORPUS_DAYS = 14  # jours par courbe dans le corpus
 
 _env_cap = os.environ.get("ENEDIS_MAX_METERS", "500")
 MAX_METERS_UPLOAD: int | None = None if _env_cap.lower() in ("none", "0", "all") else int(_env_cap)

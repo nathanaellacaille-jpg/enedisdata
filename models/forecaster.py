@@ -3,9 +3,7 @@ from pathlib import Path
 from sklearn.linear_model import RidgeCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from config import (
-    FCST_N_LAGS, FCST_N_FOURIER, FCST_HORIZON_H, STEPS_PER_DAY,
-)
+from config import FCST_N_LAGS, FCST_N_FOURIER, STEPS_PER_DAY
 
 _NLINEAR_L = 192
 _NLINEAR_LAMBDA = 1e-3

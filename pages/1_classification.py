@@ -88,48 +88,28 @@ def _compute_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
-def _predict_all(features: pd.DataFrame, labels: dict) -> tuple:
-    """Predit classes et probabilites pour tous les compteurs (cache par dataset)."""
-    clf, *_ = _train_model(features, labels)
+def _predict_all(features: pd.DataFrame, labels: dict) -> pd.Series:
+    """Probabilite RS pour tous les compteurs (cache par dataset)."""
+    clf = _train_model(features, labels)
     if clf is None:
-        return pd.Series(index=features.index, dtype=int), pd.Series(index=features.index, dtype=float)
-    proba = clf.predict_proba(features)
-    return (
-        pd.Series((proba >= clf.threshold_).astype(int), index=features.index),
-        pd.Series(proba, index=features.index),
-    )
+        return pd.Series(index=features.index, dtype=float)
+    return pd.Series(clf.predict_proba(features), index=features.index)
 
 
 @st.cache_resource(hash_funcs={pd.DataFrame: lambda df: (len(df), df.shape[1], str(df.index[0]) if len(df) else "", str(df.index[-1]) if len(df) else "")})
 def _train_model(features: pd.DataFrame, labels: dict):
-    """Entraine EnergyClassifier (Stacking, threshold tune) et retourne (model, X_test, y_test, y_proba_test, cv_scores).
-
-    Metriques calculees uniquement sur le holdout du train_test_split (zero refit supplementaire).
-    Le CV5 imbriquant 5x EnergyClassifier etait trop lourd pour Streamlit Cloud (1 GB RAM).
-    Les vraies metriques CV5 + perm restent dispo en local via scripts/phase0_diagnostic.py.
-    """
+    """Entraine EnergyClassifier (Stacking, seuil appris) sur un holdout stratifie."""
     common = [mid for mid in features.index if str(mid) in labels]
     if len(common) < 4:
-        return None, None, None, None, None
+        return None
     X = features.loc[common]
     y = np.array([labels[str(mid)] for mid in common])
-    X_train, X_test, y_train, y_test = train_test_split(
+    X_train, _, y_train, _ = train_test_split(
         X, y, test_size=CLF_TEST_SIZE, random_state=42, stratify=y if len(np.unique(y)) > 1 else None
     )
     clf = EnergyClassifier()
     clf.fit(X_train, y_train)
-    y_proba_test = clf.predict_proba(X_test)
-    y_pred_test = (y_proba_test >= clf.threshold_).astype(int)
-    cv_scores = {
-        "accuracy": float(accuracy_score(y_test, y_pred_test)),
-        "f1": float(f1_score(y_test, y_pred_test, average="weighted")),
-        "recall_rs": float(recall_score(y_test, y_pred_test, pos_label=1, zero_division=0)),
-        "accuracy_std": 0.0,
-        "f1_std": 0.0,
-        "recall_rs_std": 0.0,
-        "threshold_mean": float(clf.threshold_),
-    }
-    return clf, X_test, y_test, y_proba_test, cv_scores
+    return clf
 
 
 # ── sidebar ───────────────────────────────────────────────────────────────────
@@ -194,20 +174,16 @@ features = _compute_features(df)
 # Labels + modele
 labels = st.session_state.get("_labels")
 clf = None
-y_proba_test = None
-cv_scores = None
 if labels is not None:
-    clf, X_test, y_test, y_proba_test, cv_scores = _train_model(features, labels)
+    clf = _train_model(features, labels)
     # Surcharge le seuil par celui du slider sidebar (defaut = PR-optimal CV5).
     if clf is not None and threshold_override is not None:
         clf.threshold_ = threshold_override
-y_pred = (y_proba_test >= clf.threshold_).astype(int) if (clf is not None and y_proba_test is not None) else None
 
 # Predictions sur tout le dataset
 if clf is not None:
-    pred_series, proba_series = _predict_all(features, labels)
+    proba_series = _predict_all(features, labels)
 else:
-    pred_series = pd.Series(index=features.index, dtype=int)
     proba_series = pd.Series(index=features.index, dtype=float)
 
 # Donnees du compteur selectionne
@@ -223,7 +199,7 @@ energy_j = mean_conso
 
 # ── Performance globale (bloc top, KPI globaux) ───────────────────────────────
 
-if clf is not None and y_test is not None and y_proba_test is not None:
+if clf is not None:
     st.markdown("### Performance globale du modele")
 
     baseline = _load_baseline_metrics()

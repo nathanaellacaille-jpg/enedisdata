@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from config import STEPS_PER_DAY, GEN_NOISE_STD, GEN_NOISE_RHO, GEN_CORPUS_N, GEN_CORPUS_DAYS, _make_rp_profile, _make_rs_profile
+from config import STEPS_PER_DAY, GEN_NOISE_STD, GEN_NOISE_RHO, _make_rp_profile, _make_rs_profile
 
 
 def _wasserstein_1d(x: np.ndarray, y: np.ndarray, n_q: int = 200) -> float:
@@ -411,36 +411,6 @@ class CurveGenerator:
             float(we_avg_real / max(wd_avg_real, 1e-9)) if wd_avg_real else 0.0
         )
         return report
-
-    def profile_stats(self) -> dict:
-        """Energie moyenne et std par type."""
-        stats = {}
-        for name, profile in self._profiles.items():
-            scale = self._scales[name]
-            daily_energy = float(profile.sum() * float(scale) * 0.5)
-            stats[name] = {"mean_kwh_day": round(daily_energy, 2), "std": 0.0}
-        return stats
-
-    def build_corpus(self, n_per_class: int = GEN_CORPUS_N, n_days: int = GEN_CORPUS_DAYS) -> "tuple[pd.DataFrame, dict]":
-        """Genere un corpus de reference [meter_id, ts, kw] + labels dict."""
-        base_ts = pd.Timestamp("2024-01-01", tz="UTC")
-        parts = []
-        labels: dict[str, int] = {}
-        for cls_idx, ct in enumerate(["RP", "RS"]):
-            gen_df = self.generate(n_per_class, ct, n_days, GEN_NOISE_STD)
-            gen_df = gen_df.copy()
-            gen_df["meter_id"] = ct + "_" + gen_df["curve_id"].map(lambda x: f"{x:04d}")
-            gen_df["ts"] = (
-                base_ts
-                + pd.to_timedelta(gen_df["day"], unit="D")
-                + pd.to_timedelta(gen_df["slot"] * 30, unit="min")
-            )
-            for mid in gen_df["meter_id"].unique():
-                labels[mid] = cls_idx
-            parts.append(gen_df[["meter_id", "ts", "kw"]])
-        df = pd.concat(parts, ignore_index=True)
-        df["kw"] = df["kw"].astype("float32")
-        return df.sort_values(["meter_id", "ts"]).reset_index(drop=True), labels
 
     def generate_bootstrap(self, n: int, curve_type: str, n_days: int = 7, noise_std: float = GEN_NOISE_STD) -> pd.DataFrame:
         """Genere n courbes par reechantillonnage direct des profils journaliers reels.
