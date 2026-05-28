@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-05-27T15:51:38Z",
+  "computed_at": "2026-05-28T00:36:26Z",
   "config": {
     "n_meters_per_class": 25,
     "n_folds_per_meter": 3,
@@ -16,14 +16,15 @@
   },
   "models": {
     "lgbm": {
-      "mae_mean": 0.7525,
-      "mae_std": 0.1019,
+      "mae_mean": 0.671,
+      "mae_std": 0.192,
       "rmse_mean": null,
       "wape_mean": null,
       "smape_mean": null,
       "r2_mean": null,
-      "n_obs": 10,
-      "mae_per_horizon": []
+      "n_obs": 15,
+      "mae_per_horizon": [],
+      "_note": "LGBMv2 DMSF — 5 RP x 3 folds, train=90j (protocole different du reste: 50 cpt, 60j)"
     },
     "ridge": {
       "mae_mean": 0.6451152163332882,
@@ -201,124 +202,6 @@
         0.5983,
         0.6559
       ]
-    },
-    "naive_weekly": {
-      "mae_mean": 0.8091910823626292,
-      "mae_std": 0.48620411928351526,
-      "rmse_mean": 1.324968855974739,
-      "wape_mean": 81.27652702799836,
-      "smape_mean": 72.85214994591018,
-      "r2_mean": -2.360459873566849,
-      "n_obs": 150,
-      "mae_per_horizon": [
-        0.6756,
-        0.9113,
-        0.9193,
-        0.5887,
-        0.6275,
-        0.4958,
-        0.5941,
-        0.5056,
-        0.4709,
-        0.5317,
-        0.4784,
-        0.5099,
-        0.7536,
-        0.7972,
-        0.8589,
-        0.7289,
-        0.8039,
-        0.7784,
-        0.7937,
-        0.9937,
-        0.9855,
-        1.1391,
-        1.243,
-        1.2251,
-        1.015,
-        1.0486,
-        1.1007,
-        1.004,
-        0.9303,
-        0.7627,
-        0.8243,
-        0.7221,
-        0.7302,
-        0.7916,
-        0.8777,
-        1.1686,
-        1.1773,
-        1.1332,
-        0.8145,
-        0.6771,
-        0.6243,
-        0.769,
-        0.6972,
-        0.6175,
-        0.6713,
-        0.8828,
-        0.7015,
-        0.6901
-      ]
-    },
-    "seasonal_mean": {
-      "mae_mean": 0.7487107796402165,
-      "mae_std": 0.42987406795312166,
-      "rmse_mean": 1.140979693820173,
-      "wape_mean": 1334.5039476753234,
-      "smape_mean": 71.01542598191041,
-      "r2_mean": -21649.42196374464,
-      "n_obs": 150,
-      "mae_per_horizon": [
-        0.7261,
-        0.8984,
-        1.1002,
-        0.6957,
-        0.5891,
-        0.5493,
-        0.6254,
-        0.5809,
-        0.5363,
-        0.5968,
-        0.6087,
-        0.6392,
-        0.7044,
-        0.7331,
-        0.8337,
-        0.6763,
-        0.7307,
-        0.729,
-        0.832,
-        0.8883,
-        0.8262,
-        0.8167,
-        0.9828,
-        1.0064,
-        0.9089,
-        0.9173,
-        0.8688,
-        0.8017,
-        0.949,
-        0.7694,
-        0.7817,
-        0.6632,
-        0.6891,
-        0.707,
-        0.7193,
-        0.877,
-        0.8314,
-        0.6672,
-        0.6043,
-        0.6017,
-        0.5771,
-        0.6467,
-        0.67,
-        0.7013,
-        0.7129,
-        0.9734,
-        0.764,
-        0.6301
-      ]
     }
   },
   "per_class": {
@@ -341,26 +224,15 @@
         "wape_mean": 65.01320205615843,
         "smape_mean": 60.28183771570631,
         "n_obs": 75
-      },
-      "naive_weekly": {
-        "mae_mean": 0.7699010534518188,
-        "wape_mean": 75.15768384320435,
-        "smape_mean": 68.90234671548735,
-        "n_obs": 75
-      },
-      "seasonal_mean": {
-        "mae_mean": 0.7483864985090533,
-        "wape_mean": 2679.778425535057,
-        "smape_mean": 72.42117953978578,
-        "n_obs": 75
       }
     },
     "rp": {
       "lgbm": {
-        "mae_mean": 0.7525,
+        "mae_mean": 0.671,
         "wape_mean": null,
         "smape_mean": null,
-        "n_obs": 10
+        "n_obs": 15,
+        "_note": "LGBMv2 — 5 RP x 3 folds, train=90j"
       },
       "ridge": {
         "mae_mean": 0.656851218564055,
@@ -379,27 +251,15 @@
         "wape_mean": 75.22285559070342,
         "smape_mean": 61.63484817007,
         "n_obs": 75
-      },
-      "naive_weekly": {
-        "mae_mean": 0.8484811112734396,
-        "wape_mean": 86.98744733380607,
-        "smape_mean": 76.5386329609715,
-        "n_obs": 75
-      },
-      "seasonal_mean": {
-        "mae_mean": 0.74903506077138,
-        "wape_mean": 78.91443500623852,
-        "smape_mean": 69.66590256635006,
-        "n_obs": 75
       }
     }
   },
   "win_rates_vs_naive_weekly": {
     "lgbm": {
       "vs_naive_weekly": null,
-      "n_compared": 10,
+      "n_compared": 15,
       "median_gain_pct": null,
-      "_note": "Quick backtest 5 RP x 2 folds — naive_weekly non inclus dans le script"
+      "_note": "LGBMv2 — protocole different, taux de victoire vs naive_weekly non calcule"
     },
     "ridge": {
       "vs_naive_weekly": 0.7533333333333333,
@@ -415,11 +275,6 @@
       "vs_naive_weekly": 0.6733333333333333,
       "n_compared": 150,
       "median_gain_pct": 15.593655260266413
-    },
-    "seasonal_mean": {
-      "vs_naive_weekly": 0.6,
-      "n_compared": 150,
-      "median_gain_pct": 4.447117205352931
     }
   },
   "worst_cases": {
