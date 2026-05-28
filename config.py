@@ -49,7 +49,11 @@ FCST_HORIZON_H = 24
 GEN_NOISE_STD = 0.15
 GEN_NOISE_RHO = 0.7  # autocorrélation AR(1) entre slots consécutifs
 
-_env_cap = os.environ.get("ENEDIS_MAX_METERS", "500")
+# Plafond de compteurs charges au demarrage. Defaut 150 : garde le cold-start
+# leger sur Streamlit Cloud (instance 1 Go) et evite les timeouts / courses
+# d'import declenches par le chargement des 500 compteurs. Le CSV etant trie par
+# compteur, les 150 premiers ont des series completes. none/all pour tout charger.
+_env_cap = os.environ.get("ENEDIS_MAX_METERS", "150")
 MAX_METERS_UPLOAD: int | None = None if _env_cap.lower() in ("none", "0", "all") else int(_env_cap)
 
 
