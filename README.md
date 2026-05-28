@@ -39,27 +39,27 @@ streamlit run app.py
 
 Pipeline : extraction de **26 features** (ratio WE/semaine, presence/absence, entropie hebdo, variabilite de l'heure du pic, signatures saisonnieres, 6 harmoniques Fourier, etc.) -> StandardScaler -> **StackingClassifier** (HistGBT + RandomForest + LogReg) avec meta LogReg. HistGBT params trouves par GridSearchCV. Seuil decisionnel appris dynamiquement par PR curve sur CV5 interne (max F1). Importances par permutation.
 
-Sur 500 compteurs labellises (85.6 % RP / 14.4 % RS) : **F1 weighted 0.938, Recall RS 0.832, Precision RS 0.771, AUC 0.969** (CV5). 12 RS manquees sur 72 (vs 30 dans la baseline RandomForest initiale).
+Sur 500 compteurs labellises (85.6 % RP / 14.4 % RS) : **F1 weighted 0.943, Recall RS 0.765, Precision RS 0.835, AUC 0.969, accuracy 0.944** (CV5). Environ 17 RS manquees sur 72.
 
 Vue lineaire (non-onglets) : metriques compteur, courbe de charge, profil moyen vs references RS/RP, facteurs determinants, positionnement parmi tous les compteurs, performance globale + matrice de confusion.
 
 **Prevision J+1** : `pages/2_prevision.py`
 
-Trois modeles sur les 48 pas (24 h) suivants :
-- Ridge regression sur 384 lags (8 jours) + features Fourier (periode 48, 3 harmoniques)
-- ARIMA(2,1,2)
-- LSTM (2 couches, 48 unites cachees, 40 epochs)
+Trois modeles sur les 48 pas (24 h) suivants, compares a une reference naive (dernier jour repete slot a slot) :
+- **LightGBM v2** : Direct Multi-Step Forecasting, 48 modeles independants (un par pas horizon), 29 features domaine-metier (meme slot J-1/J-2/J-7, moyenne et ecart-type 7j, lags, delta journalier, Fourier 6 harmoniques, calendrier one-hot), entraine sur le residu vs J-1
+- **Ridge** : regression lineaire regularisee (RidgeCV) sur 192 lags + Fourier 6 harmoniques + calendrier explicite, StandardScaler, apprise sur le residu vs J-1
+- **NLinear global** : projection lineaire pre-entrainee une fois sur les 500 compteurs (poids 192x48), aucun entrainement a la volee
 
-Train/test : la derniere journee de la serie est mise de cote a l'entrainement et sert d'evaluation. Metriques : MAE, RMSE, MAPE, R2.
+Evaluation : les 24 dernieres heures de chaque serie sont mises de cote pour la vue par compteur ; la performance globale provient d'un backtest rolling (50 compteurs x 3 folds). Metriques : MAE, RMSE.
 
 **Generation de courbes** : `pages/3_generation.py`
 
 Generateur conditionnel RS/RP calibre sur les donnees reelles. Deux modes :
 - **Parametrique** : profil moyen par type + bruit AR(1) (rho=0.7) en espace normalise + facteur d'amplitude journalier log-normal
-- **Bootstrap** : reechantillonnage de slots reels par type, perturbation legere par bruit AR(1)
+- **Bootstrap** : reechantillonnage de journees reelles par type, conditionne semaine/weekend, perturbation legere par facteur journalier et bruit AR(1)
 
 Validation de qualite : similarite de profil (Pearson), distribution d'energie journaliere (Wasserstein), indiscernabilite (test de classification gen-vs-reel).
 
 ## Choix methodologiques
 
-Choix implementes : Fourier a periode fixe, permutation importance, bruit AR(1) dans le generateur, validation par similarity_report. Pistes ouvertes : SARIMA, features meteo, split train/test temporel pour la classification.
+Choix implementes : stacking pour la classification avec seuil F1-optimal, prevision residuelle vs J-1 (Ridge, LightGBM DMSF, NLinear global), Fourier a periode fixe, permutation importance, bruit AR(1) dans le generateur, validation par similarity_report. Pistes ouvertes : features meteo, split train/test temporel pour la classification.
