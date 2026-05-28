@@ -15,8 +15,8 @@ from utils.metrics import compute_metrics
 _MODEL_LABELS = {
     "lgbm": "LightGBM",
     "ridge": "Ridge",
+    "nlinear": "NLinear",
     "naive_last_day": "Reference",
-    "naive_persistence": "Persistance",
 }
 
 
@@ -64,10 +64,10 @@ def _render_perf_banner(metrics: dict) -> None:
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         st.caption(
-            f"Phase 0 v2 — calcule le {metrics.get('computed_at', '?')}. "
+            f"Backtest calcule le {metrics.get('computed_at', '?')}. "
             "Reference = dernier jour repete slot a slot. "
-            "Persistance = derniere valeur connue. "
-            "LightGBM evalue sur 5 RP x 3 folds (train=90j)."
+            "NLinear = projection lineaire pre-entrainee sur les 500 compteurs. "
+            "LightGBM evalue sur un sous-ensemble reduit (cout eleve)."
         )
 
 
