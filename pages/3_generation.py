@@ -5,7 +5,6 @@ import streamlit as st
 
 from config import PAL, GEN_NOISE_STD, STEPS_PER_DAY
 from models.generator import CurveGenerator
-from utils.corpus import load_builtin_corpus
 from utils.data_loader import load_default_ts, load_default_labels
 
 
@@ -30,13 +29,10 @@ def _plotly_base() -> dict:
 
 @st.cache_resource
 def _fit_generator(ts_key: str, lbl_key: str, _df: pd.DataFrame | None, _labels: dict | None) -> CurveGenerator:
-    """Calibre le generateur — corpus built-in si le jeu de donnees est absent."""
+    """Calibre le generateur sur les donnees reelles."""
     gen = CurveGenerator()
     if _df is not None and _labels is not None:
         gen.fit(_df, _labels)
-    else:
-        df_b, labels_b = load_builtin_corpus()
-        gen.fit(df_b, labels_b)
     return gen
 
 
@@ -97,8 +93,6 @@ with st.sidebar:
     labels = load_default_labels()
     if real_df is not None and labels is not None:
         st.caption(f"{real_df['meter_id'].nunique()} compteurs · {len(real_df):,} points")
-    else:
-        st.caption("Corpus de reference (jeu de donnees absent)")
 
     st.markdown(
         '<div class="sidebar-footer">'
@@ -113,17 +107,13 @@ with st.sidebar:
 
 st.markdown("## Generation")
 
-has_real = real_df is not None and labels is not None
-ts_key = "default_ts" if has_real else "corpus"
-lbl_key = "default_lbl" if has_real else "corpus"
+if real_df is None or labels is None:
+    st.stop()
 
-if has_real:
-    st.caption(f"Calibre sur {real_df['meter_id'].nunique()} compteurs reels — {len(real_df):,} points")
-else:
-    corpus_df, corpus_labels = load_builtin_corpus()
-    real_df = corpus_df
-    labels = corpus_labels
-    st.caption(f"Corpus de reference — {corpus_df['meter_id'].nunique()} courbes synthetiques")
+st.caption(f"Calibre sur {real_df['meter_id'].nunique()} compteurs reels — {len(real_df):,} points")
+
+ts_key = "default_ts"
+lbl_key = "default_lbl"
 
 
 # ── controles ─────────────────────────────────────────────────────────────────
@@ -132,11 +122,7 @@ curve_type = st.radio("Type", ["RS", "RP"], horizontal=True, key="gen_type")
 
 N_DAYS = 7
 gen_df = _generate(ts_key, lbl_key, 50, curve_type, N_DAYS, real_df, labels, "bootstrap")
-main_df = (
-    _sample_real_curves(ts_key, lbl_key, real_df, labels, curve_type, 50, N_DAYS)
-    if has_real
-    else gen_df
-)
+main_df = _sample_real_curves(ts_key, lbl_key, real_df, labels, curve_type, 50, N_DAYS)
 
 
 # ── graphique principal : N courbes sur 7 jours ──────────────────────────────
@@ -156,24 +142,18 @@ for cid in sorted(main_df_sorted["curve_id"].unique()):
     ))
 
 mean_curve = main_df_sorted.groupby("t")["kw"].mean()
-_mean_label = "Moyenne des courbes reelles" if has_real else "Moyenne des courbes generees"
 fig_main.add_trace(go.Scatter(
     x=mean_curve.index, y=mean_curve.values,
-    mode="lines", name=_mean_label,
+    mode="lines", name="Moyenne des courbes reelles",
     line=dict(color=PAL.ACCENT[0], width=2),
 ))
 
 day_ticks = list(range(0, total_slots, STEPS_PER_DAY))
 day_labels = [f"J{d + 1}" for d in range(N_DAYS)]
-_main_title = (
-    f"50 courbes {curve_type} reelles — 7 derniers jours"
-    if has_real
-    else f"50 courbes {curve_type} generees — 7 jours"
-)
 fig_main.update_layout(
     **_plotly_base(),
     margin=dict(l=16, r=16, t=32, b=16),
-    title=_main_title,
+    title=f"50 courbes {curve_type} reelles — 7 derniers jours",
     yaxis_title="Puissance (kW)",
     height=380,
 )
@@ -216,7 +196,7 @@ else:
         )
         st.plotly_chart(fig_a, width="stretch")
         st.metric("Ressemblance de profil", f"{report['pearson_profile'] * 100:.0f} %", delta_color="off")
-        if has_real and report["discriminative_score"] is not None:
+        if report["discriminative_score"] is not None:
             indiscernabilite = max(0.0, 1.0 - abs(report["discriminative_score"] - 0.5) * 2) * 100
             st.metric(
                 "Indiscernabilite",
