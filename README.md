@@ -4,8 +4,6 @@ Analyse, prevision et generation de courbes de charge residentielles sur donnees
 
 Enedis Analytics est une application Streamlit pour la caracterisation de profils de consommation basse tension (RES2-6-9kVA). Elle couvre trois taches : classification residence secondaire / residence principale, prevision J+1, et generation de courbes synthetiques. Destinee a des usages d'exploration et de prototypage sur donnees ouvertes Enedis.
 
-Les labels RS/RP utilises par la classification proviennent d'un clustering k-means realise en amont ; cette etape de labellisation est une entree du projet et n'est pas integree a l'application.
-
 App deployee : https://enedisdata-pcv6jat7c92bp3fqqp494m.streamlit.app/
 
 ## Structure
@@ -35,7 +33,7 @@ streamlit run app.py
 - Format attendu : CSV avec colonnes `id`, `horodate`, `valeur` (separateur `;`, `,` ou tab auto-detecte)
 - Telechargement open data : https://opendata.enedis.fr/datasets/courbes-de-charges-fictives-res2-6-9
 
-**Chargement automatique** — plus de drag-and-drop. L'app cherche le CSV dans cet ordre :
+**Chargement automatique** : plus de drag-and-drop. L'app cherche le CSV dans cet ordre :
 
 1. `RES2-6-9.csv` a la racine du repo (mode local)
 2. `/tmp/enedis-data/RES2-6-9.csv` (cache disque persistant entre runs)
@@ -52,7 +50,7 @@ Le fichier labels `RES2-6-9-labels.csv` (~9 KB, 500 ids) est tracke directement 
 
 ## Pages
 
-**Classification RS/RP** — `pages/1_classification.py`
+**Classification RS/RP** : `pages/1_classification.py`
 
 Pipeline : extraction de **26 features** (ratio WE/semaine, presence/absence, entropie hebdo, variabilite de l'heure du pic, signatures saisonnieres, 6 harmoniques Fourier, etc.) -> StandardScaler -> **StackingClassifier** (HistGBT + RandomForest + LogReg) avec meta LogReg. HistGBT params trouves par GridSearchCV. Seuil decisionnel appris dynamiquement par PR curve sur CV5 interne (max F1). Importances par permutation.
 
@@ -60,7 +58,7 @@ Sur 500 compteurs labellises (85.6 % RP / 14.4 % RS) : **F1 weighted 0.938, Reca
 
 Vue lineaire (non-onglets) : metriques compteur, courbe de charge, profil moyen vs references RS/RP, facteurs determinants, positionnement parmi tous les compteurs, performance globale + matrice de confusion.
 
-**Prevision J+1** — `pages/2_prevision.py`
+**Prevision J+1** : `pages/2_prevision.py`
 
 Trois modeles sur les 48 pas (24 h) suivants :
 - Ridge regression sur 384 lags (8 jours) + features Fourier (periode 48, 3 harmoniques)
@@ -69,7 +67,7 @@ Trois modeles sur les 48 pas (24 h) suivants :
 
 Train/test : la derniere journee de la serie est mise de cote a l'entrainement et sert d'evaluation. Metriques : MAE, RMSE, MAPE, R2.
 
-**Generation de courbes** — `pages/3_generation.py`
+**Generation de courbes** : `pages/3_generation.py`
 
 Generateur conditionnel RS/RP calibre sur les donnees reelles. Deux modes :
 - **Parametrique** : profil moyen par type + bruit AR(1) (rho=0.7) en espace normalise + facteur d'amplitude journalier log-normal
@@ -80,9 +78,3 @@ Validation de qualite : similarite de profil (Pearson), distribution d'energie j
 ## Choix methodologiques
 
 Choix implementes : Fourier a periode fixe, permutation importance, bruit AR(1) dans le generateur, validation par similarity_report. Pistes ouvertes : SARIMA, features meteo, split train/test temporel pour la classification.
-
-References principales : McLoughlin et al. (2012), Taylor & McSharry (2008), Kong et al. (2019), Fekri et al. (2020), Yildiz et al. (2021).
-
-## Licence
-
-Donnees Enedis sous Licence Ouverte v2.0 (Etalab).
