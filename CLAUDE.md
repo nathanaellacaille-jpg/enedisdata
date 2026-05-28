@@ -14,7 +14,7 @@ enedis/
 ├── utils/                  parser, features, metrics
 ├── models/                 classifier, forecaster, generator
 ├── pages/                  1_classification, 2_prevision, 3_generation
-└── docs/                   SPEC.md, UI.md
+└── docs/                   SPEC.md
 ```
 
 ## Règles code
@@ -29,10 +29,12 @@ enedis/
 - `delta_color="off"` sur chaque `st.metric` sans exception
 - Docstring une ligne sur chaque fonction
 
-## Règles UI — voir docs/UI.md
+## Règles UI
 
-Toutes les règles d'interface sont dans docs/UI.md.
-Les appliquer systématiquement, y compris dans les fonctions helper et les f-strings.
+- UI/CSS en niveaux de gris uniquement ; couleurs vives réservées aux traces (`PAL.ACCENT`).
+- Zéro emoji dans tout le code : labels, titres, markdown, f-strings, commentaires, captions.
+- Labels de métriques : 2-3 mots max.
+- Appliquer systématiquement, y compris dans les fonctions helper et les f-strings.
 
 ## Vérifications avant de déclarer une tâche terminée
 

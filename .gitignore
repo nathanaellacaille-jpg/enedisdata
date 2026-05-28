@@ -13,6 +13,7 @@ export*
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
+!notebook.ipynb
 
 # Docs de travail internes (analyses, notes)
 AUDIT_*.md

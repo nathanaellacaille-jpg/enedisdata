@@ -9,6 +9,10 @@ Dataset open data Enedis RES2-6-9kVA. Format CSV avec colonnes `id` (case-insens
 
 Le dataset contient 500 compteurs uniques. Les labels (`RES2-6-9-labels.csv`, 500 ids) sont versionnes dans le repo.
 
+## Perimetre
+
+Le projet livre **3 taches** exposees dans le dashboard : classification RS/RP, prevision J+1, generation de courbes. Les labels RS/RP (colonnes `label` et `cluster` du CSV) proviennent d'un clustering k-means realise en amont (hors repo, hors application) ; cette etape de labellisation est consideree comme une entree du projet et non comme un livrable. Aucune page ni module de clustering n'est integre a l'app.
+
 ## Arborescence
 
 ```
@@ -35,8 +39,6 @@ pages/
   3_generation.py
 docs/
   SPEC.md
-  AUDIT.md
-  UI.md
 ```
 
 ## config.py
@@ -78,7 +80,7 @@ _env_cap = os.environ.get("ENEDIS_MAX_METERS", "500")
 MAX_METERS_UPLOAD: int | None = None if _env_cap.lower() in ("none", "0", "all") else int(_env_cap)
 ```
 
-Palette : voir [UI.md](UI.md). `PAL.MULTI` pour l'UI en niveaux de gris, `PAL.ACCENT` pour les traces de graphiques uniquement.
+Palette : `PAL.MULTI` pour l'UI en niveaux de gris, `PAL.ACCENT` pour les traces de graphiques uniquement.
 
 ## utils/parser.py
 
@@ -204,8 +206,7 @@ class RidgeForecaster:
     # Selection naturelle via regularisation L2
 
 class ARIMAForecaster:
-    # ordre fixe (2,1,2), pas de saisonnalite
-    # cf. AUDIT.md : SARIMA recommande
+    # ordre fixe (2,1,2), pas de saisonnalite (SARIMA = piste d'amelioration)
 
 class LSTMForecaster:
     # 2 couches, 48 unites cachees, 40 epochs, batch 64

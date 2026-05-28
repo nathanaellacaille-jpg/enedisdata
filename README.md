@@ -4,6 +4,8 @@ Analyse, prevision et generation de courbes de charge residentielles sur donnees
 
 Enedis Analytics est une application Streamlit pour la caracterisation de profils de consommation basse tension (RES2-6-9kVA). Elle couvre trois taches : classification residence secondaire / residence principale, prevision J+1, et generation de courbes synthetiques. Destinee a des usages d'exploration et de prototypage sur donnees ouvertes Enedis.
 
+Les labels RS/RP utilises par la classification proviennent d'un clustering k-means realise en amont ; cette etape de labellisation est une entree du projet et n'est pas integree a l'application.
+
 App deployee : https://enedisdata-pcv6jat7c92bp3fqqp494m.streamlit.app/
 
 ## Structure
@@ -16,8 +18,6 @@ models/                 classifier, forecaster, generator
 pages/                  3 pages Streamlit (classification, prevision, generation)
 assets/style.css        CSS global
 docs/SPEC.md            specification technique a jour
-docs/AUDIT.md           audit scientifique (snapshot 2026-04-04, recos partiellement implementees)
-docs/UI.md              regles d'interface
 ```
 
 ## Installation
@@ -81,7 +81,7 @@ Validation de qualite : similarite de profil (Pearson), distribution d'energie j
 
 ## Choix methodologiques
 
-Les justifications scientifiques sont dans `docs/AUDIT.md`. Plusieurs recommandations de cet audit ont ete implementees depuis (Fourier a periode fixe, permutation importance, bruit AR(1) dans le generateur, validation par similarity_report). Restent ouvertes : SARIMA, features meteo, split train/test temporel pour la classification.
+Choix implementes : Fourier a periode fixe, permutation importance, bruit AR(1) dans le generateur, validation par similarity_report. Pistes ouvertes : SARIMA, features meteo, split train/test temporel pour la classification.
 
 References principales : McLoughlin et al. (2012), Taylor & McSharry (2008), Kong et al. (2019), Fekri et al. (2020), Yildiz et al. (2021).
 
