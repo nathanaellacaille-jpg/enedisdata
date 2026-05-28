@@ -12,20 +12,16 @@ from utils.data_loader import load_default_ts
 from utils.metrics import compute_metrics
 
 
-# Mapping nom JSON -> libelle affiche (cf. assets/forecast_baseline_metrics.json)
 _MODEL_LABELS = {
     "lgbm": "LightGBM",
     "ridge": "Ridge",
     "naive_last_day": "Reference",
-    "naive_weekly": "Hebdo",
-    "seasonal_mean": "Moy. saisonniere",
     "naive_persistence": "Persistance",
 }
 
 
 @st.cache_data
 def _load_forecast_baseline() -> dict | None:
-    """Charge assets/forecast_baseline_metrics.json (Phase 0 v2) ou None."""
     p = Path(ROOT_DIR) / "assets" / "forecast_baseline_metrics.json"
     if not p.exists():
         return None
@@ -37,7 +33,6 @@ def _load_forecast_baseline() -> dict | None:
 
 
 def _render_perf_banner(metrics: dict) -> None:
-    """Affiche le top 4 modeles MAE + table detaillee depuis Phase 0 v2."""
     models = metrics["models"]
     win_rates = metrics.get("win_rates_vs_naive_weekly", {})
     sorted_models = sorted(models.items(), key=lambda kv: kv[1]["mae_mean"])
@@ -52,19 +47,20 @@ def _render_perf_banner(metrics: dict) -> None:
 
     cols = st.columns(4)
     for i, (name, m) in enumerate(sorted_models[:4]):
-        label = _MODEL_LABELS.get(name, name)
-        cols[i].metric(f"#{i + 1} {label}", f"{m['mae_mean']:.3f} kW", delta_color="off")
+        cols[i].metric(f"#{i + 1} {_MODEL_LABELS.get(name, name)}", f"{m['mae_mean']:.3f} kW", delta_color="off")
 
-    with st.expander("Detail complet et taux de victoire vs Hebdo (semaine -7j)"):
+    with st.expander("Detail complet et taux de victoire vs Reference (J-7)"):
         rows = []
         for name, m in sorted_models:
             wr = win_rates.get(name, {})
+            v = wr.get("vs_naive_weekly") if wr else None
+            g = wr.get("median_gain_pct") if wr else None
             rows.append({
                 "Modele": _MODEL_LABELS.get(name, name),
                 "MAE (kW)": round(m["mae_mean"], 3),
                 "RMSE (kW)": round(m.get("rmse_mean") or float("nan"), 3),
-                "Bat Reference": (f"{wr['vs_naive_weekly'] * 100:.0f}%" if wr.get('vs_naive_weekly') is not None else "—") if wr else "—",
-                "Gain median": (f"{wr['median_gain_pct']:+.1f}%" if wr.get('median_gain_pct') is not None else "—") if wr else "—",
+                "Bat Reference": f"{v * 100:.0f}%" if v is not None else "—",
+                "Gain median": f"{g:+.1f}%" if g is not None else "—",
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         st.caption(
@@ -75,10 +71,7 @@ def _render_perf_banner(metrics: dict) -> None:
         )
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
 def _plotly_base() -> dict:
-    """Retourne le layout de base pour les graphiques Plotly."""
     return dict(
         plot_bgcolor="white",
         paper_bgcolor="white",
@@ -96,42 +89,31 @@ def _plotly_base() -> dict:
 
 @st.cache_resource
 def _train_ridge(series_key: str, series: list) -> RidgeForecaster:
-    """Entraine le forecaster Ridge."""
-    arr = np.array(series, dtype=float)
     mdl = RidgeForecaster()
-    mdl.fit(arr)
+    mdl.fit(np.array(series, dtype=float))
     return mdl
 
 
 @st.cache_resource
 def _train_lgbm(series_key: str, series: list) -> LGBMForecasterV2:
-    """Entraine le forecaster LightGBM DMSF v2 (29 features domaine, 48 modeles)."""
-    arr = np.array(series, dtype=float)
     mdl = LGBMForecasterV2()
-    mdl.fit(arr)
+    mdl.fit(np.array(series, dtype=float))
     return mdl
 
 
 @st.cache_resource
 def _load_nlinear(series_key: str, series: list) -> NLinearGlobalForecaster | None:
-    """Charge les poids NLinear global et prepare la fenetre courante."""
     try:
-        arr = np.array(series, dtype=float)
         mdl = NLinearGlobalForecaster()
-        mdl.fit(arr)
+        mdl.fit(np.array(series, dtype=float))
         return mdl
     except FileNotFoundError:
         return None
 
 
 def _naive_forecast(series: np.ndarray, h: int) -> np.ndarray:
-    """Prevision naive : repete le dernier jour connu de la serie d'entrainement."""
-    day = series[-STEPS_PER_DAY:]
-    reps = (h // STEPS_PER_DAY) + 1
-    return np.tile(day, reps)[:h]
+    return np.tile(series[-STEPS_PER_DAY:], (h // STEPS_PER_DAY) + 1)[:h]
 
-
-# ── sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
     st.markdown("**Donnees**")
@@ -153,11 +135,8 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-# ── main ─────────────────────────────────────────────────────────────────────
-
 st.markdown("## Prevision")
 
-# Bandeau performance globale : Phase 0 v2 (50 compteurs x 3 folds)
 _baseline = _load_forecast_baseline()
 if _baseline is not None:
     _render_perf_banner(_baseline)
@@ -173,15 +152,10 @@ ts_index = meter_df["ts"].values
 
 _MIN_PTS = LGBM_V2_LOOKBACK + STEPS_PER_DAY * 2 + FCST_HORIZON_H * 2
 if len(series) < _MIN_PTS:
-    min_days = _MIN_PTS // STEPS_PER_DAY + 1
-    st.warning(f"Serie trop courte pour la prevision (minimum {min_days} jours).")
+    st.warning(f"Serie trop courte pour la prevision (minimum {_MIN_PTS // STEPS_PER_DAY + 1} jours).")
     st.stop()
 
 horizon = FCST_HORIZON_H * 2
-
-# Capping fenetre d'entrainement a 90 jours pour tenir dans 1 GB Streamlit Cloud.
-# Phase 0 v2 a montre que MAE est equivalente entre 60-90 jours et serie complete
-# (la saisonnalite hebdo + 4 jours de lags suffisent), donc pas de perte de qualite.
 TRAIN_WINDOW_PTS = 90 * STEPS_PER_DAY
 if len(series) > TRAIN_WINDOW_PTS + horizon:
     train_series = series[-TRAIN_WINDOW_PTS - horizon:-horizon]
@@ -192,153 +166,89 @@ else:
 test_series = series[-horizon:]
 test_ts = ts_index[-horizon:]
 
-# Cache key inclut la taille de la fenetre pour invalider proprement
 series_key = f"{selected}_{len(train_series)}"
 
-# ── Chargement sequentiel des modeles (un par un pour eviter les pics RAM) ────
-
-# 1. Ridge — rapide, pas de spinner
 ridge = _train_ridge(series_key, train_series.tolist())
 ridge_pred = ridge.predict(horizon)
 naive_pred = _naive_forecast(train_series, horizon)
 
-# 2. NLinear global — chargement poids pre-calcules, pas d'entrainement
 nlinear = _load_nlinear(series_key, train_series.tolist())
 nlinear_pred = nlinear.predict(horizon) if nlinear is not None else None
 
-# 3. LightGBM DMSF — 48 modeles, spinner car premier chargement peut prendre ~15s
 with st.spinner("Entrainement LightGBM..."):
     lgbm = _train_lgbm(series_key, train_series.tolist())
 lgbm_pred = lgbm.predict(horizon)
 
 last_train_ts = pd.Timestamp(train_ts[-1])
-future_ts = test_ts
-y_eval = test_series
-
-# ── Tabs ──────────────────────────────────────────────────────────────────────
 
 tab1, tab2, tab3, tab4 = st.tabs(["Prevision", "Resultats", "Precision par heure", "Comment ca marche"])
 
-# ── Tab 1 : Prevision ─────────────────────────────────────────────────────────
 with tab1:
-    n_hist = min(len(series), STEPS_PER_DAY * 7)
-    hist_ts = ts_index[-n_hist:]
-    hist_kw = series[-n_hist:]
+    hist_ts = ts_index[-min(len(series), STEPS_PER_DAY * 7):]
+    hist_kw = series[-min(len(series), STEPS_PER_DAY * 7):]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=hist_ts, y=hist_kw,
-        mode="lines", name="Historique",
-        line=dict(color=PAL.REAL, width=2),
-    ))
+    fig.add_trace(go.Scatter(x=hist_ts, y=hist_kw, mode="lines", name="Historique",
+                             line=dict(color=PAL.REAL, width=2)))
     fig.add_vline(x=str(last_train_ts), line_width=1, line_dash="solid", line_color=PAL.BORDER)
-    fig.add_annotation(
-        x=str(last_train_ts), y=1, yref="paper",
-        text="Donnees connues", showarrow=False,
-        font=dict(size=10, color=PAL.TEXT_MUTED),
-        xanchor="right", xshift=-6,
-    )
-    # Predictions : du plus fonce (meilleur esperé) au plus clair (reference)
-    fig.add_trace(go.Scatter(
-        x=future_ts, y=lgbm_pred,
-        mode="lines", name="LightGBM",
-        line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
-    ))
-    fig.add_trace(go.Scatter(
-        x=future_ts, y=ridge_pred,
-        mode="lines", name="Ridge",
-        line=dict(color=PAL.ACCENT[0], width=1.5, dash="longdash"),
-    ))
+    fig.add_annotation(x=str(last_train_ts), y=1, yref="paper", text="Donnees connues",
+                       showarrow=False, font=dict(size=10, color=PAL.TEXT_MUTED),
+                       xanchor="right", xshift=-6)
+    fig.add_trace(go.Scatter(x=test_ts, y=lgbm_pred, mode="lines", name="LightGBM",
+                             line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash")))
+    fig.add_trace(go.Scatter(x=test_ts, y=ridge_pred, mode="lines", name="Ridge",
+                             line=dict(color=PAL.ACCENT[0], width=1.5, dash="longdash")))
     if nlinear_pred is not None:
-        fig.add_trace(go.Scatter(
-            x=future_ts, y=nlinear_pred,
-            mode="lines", name="NLinear",
-            line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot"),
-        ))
-    fig.add_trace(go.Scatter(
-        x=future_ts, y=naive_pred,
-        mode="lines", name="Reference",
-        line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot"),
-    ))
-
-    fig.update_layout(
-        **_plotly_base(),
-        margin=dict(l=16, r=16, t=32, b=16),
-        title=f"Prevision 24h — {selected}",
-        yaxis_title="kW",
-    )
+        fig.add_trace(go.Scatter(x=test_ts, y=nlinear_pred, mode="lines", name="NLinear",
+                                 line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot")))
+    fig.add_trace(go.Scatter(x=test_ts, y=naive_pred, mode="lines", name="Reference",
+                             line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot")))
+    fig.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16),
+                      title=f"Prevision 24h — {selected}", yaxis_title="kW")
     st.plotly_chart(fig, width="stretch")
 
-# ── Tab 2 : Resultats ─────────────────────────────────────────────────────────
 with tab2:
     rows = [("LightGBM", lgbm_pred), ("Ridge", ridge_pred), ("Reference", naive_pred)]
     if nlinear_pred is not None:
         rows.insert(2, ("NLinear", nlinear_pred))
 
-    mae_vals = {name: compute_metrics(y_eval, pred)["MAE"] for name, pred in rows}
+    mae_vals = {name: compute_metrics(test_series, pred)["MAE"] for name, pred in rows}
     best = min(mae_vals, key=mae_vals.get)
-    mae_ref = mae_vals["Reference"]
 
     c1, c2 = st.columns(2)
     c1.metric("Meilleur modele", best, delta_color="off")
-    c2.metric("Erreur reference (kW)", f"{mae_ref:.2f}", delta_color="off")
+    c2.metric("Erreur reference (kW)", f"{mae_vals['Reference']:.2f}", delta_color="off")
 
-    # Classement MAE sous forme de barres
     sorted_names = sorted(mae_vals, key=mae_vals.get)
-    sorted_mae = [mae_vals[n] for n in sorted_names]
-    bar_colors = [PAL.ACCENT[0] if n == best else PAL.MULTI[4] for n in sorted_names]
-
     fig_bar = go.Figure(go.Bar(
-        x=sorted_mae,
+        x=[mae_vals[n] for n in sorted_names],
         y=sorted_names,
         orientation="h",
-        marker_color=bar_colors,
+        marker_color=[PAL.ACCENT[0] if n == best else PAL.MULTI[4] for n in sorted_names],
         width=0.4,
     ))
-    fig_bar.update_layout(
-        **_plotly_base(),
-        margin=dict(l=16, r=16, t=32, b=16),
-        title="Erreur moyenne par modele (MAE en kW) — moins = mieux",
-        xaxis_title="kW",
-    )
+    fig_bar.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16),
+                          title="Erreur moyenne par modele (MAE en kW) — moins = mieux",
+                          xaxis_title="kW")
     st.plotly_chart(fig_bar, width="stretch")
 
-# ── Tab 3 : Precision par heure ───────────────────────────────────────────────
 with tab3:
     hours = np.arange(1, horizon + 1) / 2.0
-
     fig_h = go.Figure()
-    fig_h.add_trace(go.Scatter(
-        x=hours, y=np.abs(y_eval - lgbm_pred),
-        mode="lines", name="LightGBM",
-        line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash"),
-    ))
-    fig_h.add_trace(go.Scatter(
-        x=hours, y=np.abs(y_eval - ridge_pred),
-        mode="lines", name="Ridge",
-        line=dict(color=PAL.ACCENT[0], width=1.5),
-    ))
+    fig_h.add_trace(go.Scatter(x=hours, y=np.abs(test_series - lgbm_pred), mode="lines",
+                               name="LightGBM", line=dict(color=PAL.ACCENT[1], width=1.5, dash="dash")))
+    fig_h.add_trace(go.Scatter(x=hours, y=np.abs(test_series - ridge_pred), mode="lines",
+                               name="Ridge", line=dict(color=PAL.ACCENT[0], width=1.5)))
     if nlinear_pred is not None:
-        fig_h.add_trace(go.Scatter(
-            x=hours, y=np.abs(y_eval - nlinear_pred),
-            mode="lines", name="NLinear",
-            line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot"),
-        ))
-    fig_h.add_trace(go.Scatter(
-        x=hours, y=np.abs(y_eval - naive_pred),
-        mode="lines", name="Reference",
-        line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot"),
-    ))
-    fig_h.update_layout(
-        **_plotly_base(),
-        margin=dict(l=16, r=16, t=32, b=16),
-        title="Ecart de prevision selon l'heure",
-        xaxis_title="Heure de prevision",
-        yaxis_title="Ecart (kW)",
-    )
+        fig_h.add_trace(go.Scatter(x=hours, y=np.abs(test_series - nlinear_pred), mode="lines",
+                                   name="NLinear", line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot")))
+    fig_h.add_trace(go.Scatter(x=hours, y=np.abs(test_series - naive_pred), mode="lines",
+                               name="Reference", line=dict(color=PAL.TEXT_MUTED, width=1.5, dash="dot")))
+    fig_h.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16),
+                        title="Ecart de prevision selon l'heure",
+                        xaxis_title="Heure de prevision", yaxis_title="Ecart (kW)")
     st.plotly_chart(fig_h, width="stretch")
 
-# ── Tab 4 : Comment ca marche ─────────────────────────────────────────────────
 with tab4:
     st.markdown("**LightGBM v2** (DMSF, 48 modeles, 29 features domaine-metier, Fourier 6 harmoniques, calendrier)")
     st.caption(
