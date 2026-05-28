@@ -34,6 +34,16 @@ def _discriminative_score(real_daily: np.ndarray, gen_daily: np.ndarray) -> "flo
         return None
 
 
+def _filter_corpus(arr: np.ndarray, ep_limit: float) -> np.ndarray:
+    """Garde les journees avec ratio energie/pic < ep_limit et pic positif."""
+    if len(arr) == 0:
+        return arr
+    peaks = arr.max(axis=1)
+    ep = arr.sum(axis=1) * 0.5 / np.maximum(peaks, 1e-9)
+    mask = (peaks > 0) & (ep < ep_limit)
+    return arr[mask] if mask.any() else arr[peaks > 0]
+
+
 class CurveGenerator:
     """Generateur de courbes de charge synthetiques."""
 
@@ -117,10 +127,10 @@ class CurveGenerator:
             valid = list(valid_idx)
             meter_peaks = meter_peaks_smooth  # alias conserve pour la suite
 
-            # Log-normal pic journalier pour le bootstrap (evite le biais shape parametrique/reel)
-            log_e = np.log(meter_peaks_daily.loc[valid].values + 1e-9)
-            self._bootstrap_log_mean[label_name] = float(np.median(log_e))
-            self._bootstrap_log_std[label_name] = float(np.clip(np.std(log_e), 0.05, 1.5))
+            # Bootstrap : reutilise la distribution de scale (calibree sur energie/profil shape)
+            # Le corpus filtre ci-dessous aligne le ratio e/p corpus sur le ratio cible
+            self._bootstrap_log_mean[label_name] = float(np.log(max(self._scales[label_name], 1e-9)))
+            self._bootstrap_log_std[label_name] = float(self._scale_log_std[label_name])
 
             # Tableau (n_compteurs × 48) des profils normalisés au pic de chaque compteur
             norm_matrix = (
@@ -209,7 +219,12 @@ class CurveGenerator:
                 .dropna()
                 .values.astype(np.float32)
             )
-            self._corpus_daily[label_name] = dp[dp.max(axis=1) > 0]
+            # Ratio e/p cible : calibre sur les medianes par compteur
+            target_ep = (
+                float(meter_energy.loc[valid].median())
+                / max(float(meter_peaks_daily.loc[valid].median()), 1e-9)
+            )
+            self._corpus_daily[label_name] = _filter_corpus(dp, 2.0 * target_ep)
 
             # Corpus conditionne par type de jour pour le bootstrap
             sub_dow = sub[sub["meter_id"].isin(valid)].copy()
@@ -226,10 +241,7 @@ class CurveGenerator:
                     .dropna()
                     .values.astype(np.float32)
                 )
-                getattr(self, attr)[label_name] = (
-                    arr[arr.max(axis=1) > 0] if len(arr) > 0
-                    else np.empty((0, STEPS_PER_DAY), dtype=np.float32)
-                )
+                getattr(self, attr)[label_name] = _filter_corpus(arr, 2.0 * target_ep)
 
         return self
 
