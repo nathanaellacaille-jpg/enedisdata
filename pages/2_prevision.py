@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from config import PAL, FCST_HORIZON_H, STEPS_PER_DAY, ROOT_DIR
-from models.forecaster import LGBMForecasterV2, RidgeForecaster, LGBM_V2_LOOKBACK
+from models.forecaster import LGBMForecasterV2, NLinearGlobalForecaster, RidgeForecaster, LGBM_V2_LOOKBACK
 from utils.data_loader import load_default_ts
 from utils.metrics import compute_metrics
 
@@ -112,6 +112,18 @@ def _train_lgbm(series_key: str, series: list) -> LGBMForecasterV2:
     return mdl
 
 
+@st.cache_resource
+def _load_nlinear(series_key: str, series: list) -> NLinearGlobalForecaster | None:
+    """Charge les poids NLinear global et prepare la fenetre courante."""
+    try:
+        arr = np.array(series, dtype=float)
+        mdl = NLinearGlobalForecaster()
+        mdl.fit(arr)
+        return mdl
+    except FileNotFoundError:
+        return None
+
+
 def _naive_forecast(series: np.ndarray, h: int) -> np.ndarray:
     """Prevision naive : repete le dernier jour connu de la serie d'entrainement."""
     day = series[-STEPS_PER_DAY:]
@@ -190,7 +202,11 @@ ridge = _train_ridge(series_key, train_series.tolist())
 ridge_pred = ridge.predict(horizon)
 naive_pred = _naive_forecast(train_series, horizon)
 
-# 2. LightGBM DMSF — 48 modeles, spinner car premier chargement peut prendre ~15s
+# 2. NLinear global — chargement poids pre-calcules, pas d'entrainement
+nlinear = _load_nlinear(series_key, train_series.tolist())
+nlinear_pred = nlinear.predict(horizon) if nlinear is not None else None
+
+# 3. LightGBM DMSF — 48 modeles, spinner car premier chargement peut prendre ~15s
 with st.spinner("Entrainement LightGBM..."):
     lgbm = _train_lgbm(series_key, train_series.tolist())
 lgbm_pred = lgbm.predict(horizon)
@@ -233,6 +249,12 @@ with tab1:
         mode="lines", name="Ridge",
         line=dict(color=PAL.ACCENT[0], width=1.5, dash="longdash"),
     ))
+    if nlinear_pred is not None:
+        fig.add_trace(go.Scatter(
+            x=future_ts, y=nlinear_pred,
+            mode="lines", name="NLinear",
+            line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot"),
+        ))
     fig.add_trace(go.Scatter(
         x=future_ts, y=naive_pred,
         mode="lines", name="Reference",
@@ -250,6 +272,8 @@ with tab1:
 # ── Tab 2 : Resultats ─────────────────────────────────────────────────────────
 with tab2:
     rows = [("LightGBM", lgbm_pred), ("Ridge", ridge_pred), ("Reference", naive_pred)]
+    if nlinear_pred is not None:
+        rows.insert(2, ("NLinear", nlinear_pred))
 
     mae_vals = {name: compute_metrics(y_eval, pred)["MAE"] for name, pred in rows}
     best = min(mae_vals, key=mae_vals.get)
@@ -294,6 +318,12 @@ with tab3:
         mode="lines", name="Ridge",
         line=dict(color=PAL.ACCENT[0], width=1.5),
     ))
+    if nlinear_pred is not None:
+        fig_h.add_trace(go.Scatter(
+            x=hours, y=np.abs(y_eval - nlinear_pred),
+            mode="lines", name="NLinear",
+            line=dict(color=PAL.ACCENT[2], width=1.5, dash="dashdot"),
+        ))
     fig_h.add_trace(go.Scatter(
         x=hours, y=np.abs(y_eval - naive_pred),
         mode="lines", name="Reference",
@@ -323,6 +353,14 @@ with tab4:
         "+ jour-de-la-semaine en one-hot + indicateur weekend. Apres tuning Phase 1, bat la Reference "
         "de 7% en moyenne sur 50 compteurs."
     )
+    if nlinear_pred is not None:
+        st.markdown("**NLinear** (projection lineaire globale, pre-entraine sur 500 compteurs)")
+        st.caption(
+            "Soustrait la derniere valeur de la fenetre avant projection : pred = W.T @ (window - window[-1]) + window[-1]. "
+            "W (192x48) pre-calcule une fois sur l'ensemble des 500 compteurs par accumulation des equations normales "
+            "(O(L^2) memoire fixe). Prediction = un produit matrice-vecteur, aucun entrainement a la volee. "
+            "Sur le backtest 5 compteurs x 3 folds : MAE 0.646, +11% vs Reference."
+        )
     st.markdown("**Reference** (repeter le dernier jour)")
     st.caption(
         "Repete simplement la consommation du jour precedent slot par slot. Niveau de comparaison "

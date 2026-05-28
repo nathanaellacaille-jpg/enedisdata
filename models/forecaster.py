@@ -1,10 +1,29 @@
 import numpy as np
+from pathlib import Path
 from sklearn.linear_model import RidgeCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from config import (
     FCST_N_LAGS, FCST_N_FOURIER, FCST_HORIZON_H, STEPS_PER_DAY,
 )
+
+_NLINEAR_L = 192
+_NLINEAR_LAMBDA = 1e-3
+_NLINEAR_WEIGHTS = Path(__file__).resolve().parent.parent / "assets" / "nlinear_global_weights.npy"
+_nlinear_W_cache: np.ndarray | None = None
+
+
+def _load_nlinear_W() -> np.ndarray:
+    """Charge les poids NLinear global (cache module-level)."""
+    global _nlinear_W_cache
+    if _nlinear_W_cache is None:
+        if not _NLINEAR_WEIGHTS.exists():
+            raise FileNotFoundError(
+                f"Poids NLinear introuvables : {_NLINEAR_WEIGHTS}. "
+                "Lancer scripts/compute_nlinear_global_weights.py"
+            )
+        _nlinear_W_cache = np.load(str(_NLINEAR_WEIGHTS))
+    return _nlinear_W_cache
 
 _LGBM_PARAMS = dict(
     n_estimators=200,
@@ -305,4 +324,27 @@ class RidgeForecaster:
             window[-1] = y_hat
         return np.array(preds)
 
+
+class NLinearGlobalForecaster:
+    """NLinear MIMO pre-entraine sur le dataset complet (500 compteurs).
+
+    fit() stocke uniquement la fenetre courante — aucun entrainement.
+    predict() = W_global.T @ (window - window[-1]) + window[-1], O(L*STEPS).
+    W_global (192x48) pre-calcule par scripts/compute_nlinear_global_weights.py.
+    """
+
+    def __init__(self):
+        """Initialise le forecaster NLinear global."""
+        self._window: np.ndarray | None = None
+
+    def fit(self, series: np.ndarray, y=None):
+        """Stocke la fenetre d'entree (pas de training)."""
+        self._window = series[-_NLINEAR_L:].astype(float)
+        return self
+
+    def predict(self, h: int) -> np.ndarray:
+        """Predit h pas via W_global pre-calcule."""
+        W = _load_nlinear_W()
+        x = self._window - self._window[-1]
+        return (W.T @ x + self._window[-1])[:h]
 

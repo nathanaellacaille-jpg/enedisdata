@@ -17,6 +17,10 @@ STEPS = 48
 N_METERS = 5
 TRAIN_DAYS = 90
 N_FOLDS = 3
+# IDs fixes pour reproductibilite
+METER_IDS = [
+    "47000903308", "476866365062", "763769451041", "917755392634", "980841892564",
+]
 
 
 def mae(a, b):
@@ -78,7 +82,7 @@ def main():
     from utils.parser import parse_timeseries, parse_labels
 
     print(f"Chargement ({N_METERS} compteurs, {N_FOLDS} folds, train={TRAIN_DAYS}j)...", flush=True)
-    df = parse_timeseries(str(ROOT / "RES2-6-9.csv"), max_meters=N_METERS)
+    df = parse_timeseries(str(ROOT / "RES2-6-9.csv"), max_meters=None)
 
     lbl_path = ROOT / "RES2-6-9-labels.csv"
     labels = {}
@@ -97,9 +101,7 @@ def main():
 
     all_maes = {k: [] for k, _ in configs}
 
-    meters = [m for m in df["meter_id"].unique()
-              if (df["meter_id"] == m).sum() > TRAIN_DAYS * STEPS + STEPS * 8]
-    meters = meters[:N_METERS]
+    meters = [m for m in METER_IDS if m in df["meter_id"].values][:N_METERS]
 
     for mi, mid in enumerate(meters):
         s = df[df["meter_id"] == mid].sort_values("ts")["kw"].values.astype(float)
