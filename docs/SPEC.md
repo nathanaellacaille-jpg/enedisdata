@@ -1,7 +1,7 @@
 # SPEC.md
 
 Reference technique de l'etat actuel du projet Enedis Analytics.
-A jour au 2026-05-26.
+A jour au 2026-05-29.
 
 ## Contexte
 
@@ -25,11 +25,11 @@ RES2-6-9.csv             gitignore, telecharge depuis GitHub Release au cold sta
 assets/style.css         CSS global
 utils/
   parser.py              CSV -> DataFrame [meter_id (category), ts (UTC), kw (float32)]
-  features.py            17 features par compteur
+  features.py            26 features par compteur
   metrics.py             MAE, RMSE, MAPE, R2
   data_loader.py         resolution path local / cache /tmp / download URL
 models/
-  classifier.py          EnergyClassifier (StandardScaler + RandomForest)
+  classifier.py          EnergyClassifier (StandardScaler + StackingClassifier)
   forecaster.py          RidgeForecaster, LGBMForecasterV2, NLinearGlobalForecaster
   generator.py           CurveGenerator (mode parametrique + bootstrap)
 pages/
@@ -169,18 +169,19 @@ class EnergyClassifier:
 - Meta-learner : LogisticRegression sur les probas out-of-fold (CV5 interne)
 - Le `StackingClassifier` de sklearn gere la CV interne (cv=5) pour generer les meta-features sans leakage.
 
-Le seuil decisionnel monte autour de 0.71 (probas du stacking ecrasees vers le haut par le meta LogReg + class_weight). Plus de constante `CLF_RS_THRESHOLD` hardcodee.
+Le seuil decisionnel optimal (max F1 sur PR curve) se situe autour de 0.86 en moyenne CV5 (probas du stacking ecrasees vers le haut par le meta LogReg + class_weight). Plus de constante `CLF_RS_THRESHOLD` hardcodee.
 
-**Performance baseline (CV5, 500 compteurs)** — progression dans le temps :
-| Metrique | RF baseline (Phase 0) | HistGBT + features (Phase 1+2) | Stacking + grid (Phase 3) |
+**Performance baseline (CV5, 500 compteurs)** — progression dans le temps (valeurs courantes dans `assets/baseline_metrics.json`) :
+| Metrique | RF baseline (Phase 0) | HistGBT + features (Phase 1+2) | Stacking + grid (actuel) |
 |---|---|---|---|
-| F1 weighted | 0.908 | 0.932 | **0.938** |
-| Recall RS | 0.581 | 0.789 | **0.832** |
-| Precision RS | 0.775 | 0.767 | 0.771 |
+| F1 weighted | 0.908 | 0.932 | **0.943** |
+| Recall RS | 0.581 | 0.789 | 0.765 |
+| Precision RS | 0.775 | 0.767 | **0.835** |
 | AUC | 0.912 | 0.959 | **0.969** |
-| RS manquees | 30/72 | 15/72 | **12/72** |
+| Accuracy | — | — | **0.944** |
+| RS manquees | 30/72 | 15/72 | **17/72** |
 
-Plafond actuel : les 12 RS encore manquees ont `ratio_we_wd ~1.0`, `active=1.0`, `zero_ratio bas` — RS "occupees toute l'annee" indiscernables des RP dans les features actuelles. Lever ce plafond demanderait des donnees externes (meteo, geolocalisation, type d'habitation).
+Plafond actuel : les 17 RS encore manquees ont `ratio_we_wd ~1.0`, `active=1.0`, `zero_ratio bas` — RS "occupees toute l'annee" indiscernables des RP dans les features actuelles. Lever ce plafond demanderait des donnees externes (meteo, geolocalisation, type d'habitation).
 
 ## models/forecaster.py
 
@@ -257,7 +258,7 @@ Train/test split : dernier `FCST_HORIZON_H * 2 = 48` pas mis de cote pour evalua
 ### pages/3_generation.py
 
 Sidebar :
-- Chargement automatique. Caption "X compteurs · Y points" ou "Corpus de reference (jeu de donnees absent)" en fallback.
+- Chargement automatique. Caption "X compteurs · Y points".
 
 Vue lineaire :
 - Radio RS / RP.
