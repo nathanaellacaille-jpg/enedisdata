@@ -23,7 +23,7 @@ def _load_nlinear_W() -> np.ndarray:
         _nlinear_W_cache = np.load(str(_NLINEAR_WEIGHTS))
     return _nlinear_W_cache
 
-LGBM_V2_LOOKBACK = 336   # 7 jours — horizon max de slot_J7
+LGBM_V2_LOOKBACK = 336
 _LGBM_V2_PARAMS = dict(
     n_estimators=500,
     num_leaves=31,
@@ -37,7 +37,7 @@ _LGBM_V2_PARAMS = dict(
     verbose=-1,
 )
 
-_RIDGE_ALPHAS_LOG = np.logspace(-4, 3, 20)  # 20 valeurs en log space, audit reco
+_RIDGE_ALPHAS_LOG = np.logspace(-4, 3, 20)
 
 
 def make_lag_features(series: np.ndarray, n_lags: int) -> np.ndarray:
@@ -59,7 +59,6 @@ def make_fourier_features(n: int, n_harmonics: int = 3, period: int = 48, offset
     return np.column_stack(cols)
 
 
-
 def _calendar_block(n: int, offset: int) -> np.ndarray:
     """One-hot jour-de-semaine (7 cols) + indicateur weekend (1 col). Calendaire pur."""
     t = np.arange(offset, offset + n)
@@ -70,15 +69,6 @@ def _calendar_block(n: int, offset: int) -> np.ndarray:
 
 
 class LGBMForecasterV2:
-    """LightGBM DMSF v2 : 29 features domaine-metier au lieu de 192 lags bruts.
-
-    Features par echantillon (origin t, horizon h) :
-      Slot-level (cible t+h) : J-1/J-2/J-7 meme slot, moyenne 7j, std 7j, delta_slot
-      Etat courant (en t)    : lag-1, lag-2, delta journalier (aujourd'hui - hier)
-      Temporels (en t+h)     : Fourier journalier 6 harmoniques, DOW one-hot + weekend
-    Target : residu vs J-1 (meme que V1), DMSF 48 modeles independants.
-    Avantage vs V1 : pas de lags correles → moins d'overfitting, entrainement 3x plus rapide.
-    """
 
     def __init__(self, n_fourier: int = FCST_N_FOURIER):
         """Initialise le forecaster LightGBM V2."""
@@ -98,7 +88,6 @@ class LGBMForecasterV2:
             )
         origins = np.arange(LGBM_V2_LOOKBACK, LGBM_V2_LOOKBACK + n_samp)
 
-        # Features independantes de h — calculees une seule fois
         cs = np.concatenate([[0.0], np.cumsum(series)])
         lag1 = series[origins - 1].astype(np.float32)
         lag2 = series[origins - 2].astype(np.float32)
@@ -109,7 +98,6 @@ class LGBMForecasterV2:
 
         self._models = []
         for h in range(STEPS_PER_DAY):
-            # Features slot-level (pour le temps de prediction origin+h)
             slot_J1 = series[origins + h - STEPS_PER_DAY].astype(np.float32)
             slot_J2 = series[origins + h - 2 * STEPS_PER_DAY].astype(np.float32)
             slot_J7 = series[origins + h - 7 * STEPS_PER_DAY].astype(np.float32)
@@ -142,10 +130,9 @@ class LGBMForecasterV2:
     def predict(self, h: int) -> np.ndarray:
         """Predit h pas : residu LGBMv2[step] + naive J-1[slot]."""
         import warnings
-        s = self._last_known   # series[-336:]
+        s = self._last_known
         n = self._series_len
 
-        # Features independantes du pas
         lag1 = float(s[-1])
         lag2 = float(s[-2])
         delta_day = float(s[-STEPS_PER_DAY:].mean() - s[-2 * STEPS_PER_DAY:-STEPS_PER_DAY].mean())
@@ -154,8 +141,7 @@ class LGBMForecasterV2:
         for step in range(h):
             mdl = self._models[step % STEPS_PER_DAY]
 
-            # Slot-level features pour le slot cible (n + step)
-            slot_J1 = float(s[step - STEPS_PER_DAY])        # s[-48+step]
+            slot_J1 = float(s[step - STEPS_PER_DAY])
             slot_J2 = float(s[step - 2 * STEPS_PER_DAY])
             slot_J7 = float(s[step - 7 * STEPS_PER_DAY])
             slot_days = np.array([float(s[step - k * STEPS_PER_DAY]) for k in range(1, 8)])
@@ -183,17 +169,6 @@ class LGBMForecasterV2:
 
 
 class RidgeForecaster:
-    """Ridge avec lags + Fourier journaliere + calendrier explicite + StandardScaler.
-
-    Refonte Phase 1 (2026-05) : sur tuning set 5 compteurs, l'ancien Ridge (384 lags, 3
-    harmoniques, pas de scaler) gagnait deja +8.4% vs naive_last_day. Les ameliorations :
-      - StandardScaler avant Ridge (audit transversal) : +6 pts (le plus gros gain)
-      - n_lags reduit a 192 : +1.7 pts (384 etait surdimensionne)
-      - 6 harmoniques de Fourier journalieres (audit reco #8) : marginal mais OK
-      - Features calendaires explicites (one-hot dow + weekend) : +0.9 pts
-      - RidgeCV alphas en log space 1e-4 -> 1e3 : convergence plus fine
-    Total +16.8% vs naive sur tuning set.
-    """
 
     def __init__(self, n_lags: int = FCST_N_LAGS, n_fourier: int = FCST_N_FOURIER,
                  use_calendar: bool = True, use_scaler: bool = True):
@@ -217,7 +192,6 @@ class RidgeForecaster:
             parts.append(_calendar_block(n_rows, offset=self.n_lags))
         X = np.hstack(parts).astype(np.float32)
         y = series[self.n_lags:].astype(np.float32)
-        # naive = meme slot J-1 pour chaque point cible
         naive = series[self.n_lags - STEPS_PER_DAY : len(series) - STEPS_PER_DAY].astype(np.float32)
         return X, y, naive
 
@@ -250,12 +224,6 @@ class RidgeForecaster:
 
 
 class NLinearGlobalForecaster:
-    """NLinear MIMO pre-entraine sur le dataset complet (500 compteurs).
-
-    fit() stocke uniquement la fenetre courante — aucun entrainement.
-    predict() = W_global.T @ (window - window[-1]) + window[-1], O(L*STEPS).
-    W_global (192x48) pre-calcule par scripts/compute_nlinear_global_weights.py.
-    """
 
     def __init__(self):
         """Initialise le forecaster NLinear global."""
@@ -271,4 +239,3 @@ class NLinearGlobalForecaster:
         W = _load_nlinear_W()
         x = self._window - self._window[-1]
         return (W.T @ x + self._window[-1])[:h]
-

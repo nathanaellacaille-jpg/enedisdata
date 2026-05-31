@@ -8,11 +8,6 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 
-# Nuke any stale half-loaded project modules from sys.modules.
-# Streamlit Cloud's hot-reload ("Updated app!") ne redemarre PAS le process Python,
-# donc sys.modules garde les modules potentiellement casses des deploys precedents.
-# Sans ce nettoyage, _preload skip via `if name in sys.modules` et on utilise
-# les versions perime/cassees.
 for _stale in [m for m in list(sys.modules) if m == "config"
                or m == "utils" or m.startswith("utils.")
                or m == "models" or m.startswith("models.")]:
@@ -20,20 +15,6 @@ for _stale in [m for m in list(sys.modules) if m == "config"
 
 
 def _preload(name: str, path: Path, is_pkg: bool = False) -> None:
-    """Charge un module dans sys.modules via importlib, sans instruction import.
-
-    Contourne le bug Python 3.14 + Streamlit 1.57 : le runner interne
-    (_mpa_v1 / page.py) execute app.py dans un contexte ou l'instruction
-    'import utils.parser' echoue systematiquement (KeyError ou 'not a package')
-    car Python ne peut pas resoudre les packages locaux depuis ce contexte.
-    En chargeant les fichiers directement avec spec_from_file_location on
-    court-circuite entierement le mecanisme d'import defaillant.
-
-    Set aussi l'attribut sur le package parent pour faire fonctionner
-    `from parent.child import X` sur Python 3.14 strict.
-
-    Force re-exec si module deja la (peut etre half-loaded d'un deploy precedent).
-    """
     spec = importlib.util.spec_from_file_location(
         name, path,
         submodule_search_locations=[str(path.parent)] if is_pkg else None,
@@ -41,7 +22,6 @@ def _preload(name: str, path: Path, is_pkg: bool = False) -> None:
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
-    # Attache au package parent pour faire fonctionner `from parent.child import X`.
     if "." in name:
         parent_name, child_name = name.rsplit(".", 1)
         parent_mod = sys.modules.get(parent_name)
@@ -62,12 +42,10 @@ _preload("models.generator",  _root / "models/generator.py")
 
 st.set_page_config(page_title="Enedis Analytics", page_icon=None, layout="wide", initial_sidebar_state="expanded")
 
-# Charge le CSS global
 css_path = _root / "assets" / "style.css"
 if css_path.exists():
     st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
-# Header
 st.markdown(
     '<div class="app-header">'
     '<div class="app-title">Enedis Analytics</div>'
@@ -76,7 +54,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Navigation
 pg1 = st.Page("pages/1_classification.py", title="Classification", default=True)
 pg2 = st.Page("pages/2_prevision.py", title="Prevision")
 pg3 = st.Page("pages/3_generation.py", title="Generation")

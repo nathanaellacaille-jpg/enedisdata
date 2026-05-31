@@ -9,7 +9,6 @@ _REQUIRED_LBL = {"id", "label"}
 
 def parse_timeseries(file, max_meters: int | None = MAX_METERS_UPLOAD) -> pd.DataFrame:
     """Lit un CSV Enedis par chunks, retourne df [meter_id, ts, kw] (max_meters=None pour tous les compteurs)."""
-    # Detecte le separateur sur un echantillon sans consommer le flux
     if hasattr(file, "read"):
         sample_bytes = file.read(4096)
         file.seek(0)
@@ -19,7 +18,6 @@ def parse_timeseries(file, max_meters: int | None = MAX_METERS_UPLOAD) -> pd.Dat
     sample = sample_bytes.decode("utf-8", errors="replace")
     sep = _detect_sep(sample)
 
-    # Lecture par chunks
     chunks = []
     seen_ids: set = set()
     validated = False
@@ -35,7 +33,6 @@ def parse_timeseries(file, max_meters: int | None = MAX_METERS_UPLOAD) -> pd.Dat
         chunk = chunk.rename(columns={"id": "meter_id", "horodate": "ts", "valeur": "kw"})
         chunk["meter_id"] = chunk["meter_id"].astype(str)
 
-        # Ajoute les nouveaux ids (cap eventuel via max_meters)
         new_ids = set(chunk["meter_id"].unique()) - seen_ids
         if max_meters is None:
             seen_ids |= new_ids
@@ -58,9 +55,7 @@ def parse_timeseries(file, max_meters: int | None = MAX_METERS_UPLOAD) -> pd.Dat
     df = pd.concat(chunks, ignore_index=True)
     df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
     df = df.dropna(subset=["ts"])
-    # Valeurs source en Wh/demi-heure → conversion en kW : Wh / 0.5 h / 1000 = Wh / 500
     df["kw"] = (pd.to_numeric(df["kw"], errors="coerce").fillna(0.0) / 500.0).astype("float32")
-    # meter_id en categorical : ~1 B/ligne au lieu de ~60 B (str object). Gain RAM ~60x.
     df["meter_id"] = df["meter_id"].astype("category")
     df = df[["meter_id", "ts", "kw"]].sort_values(["meter_id", "ts"]).reset_index(drop=True)
     return df

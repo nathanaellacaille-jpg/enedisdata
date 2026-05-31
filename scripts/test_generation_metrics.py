@@ -12,14 +12,13 @@ ROOT = Path(__file__).resolve().parent.parent
 TS = ROOT / "RES2-6-9.csv"
 LBL = ROOT / "RES2-6-9-labels.csv"
 
-N_METERS = 200  # cap pour la vitesse
+N_METERS = 200
 
 
 def main():
     print("Chargement...")
     df = parse_timeseries(str(TS), max_meters=N_METERS)
     labels = parse_labels(str(LBL))
-    # restreint labels aux meters charges
     loaded = set(df["meter_id"].astype(str).unique())
     labels = {k: v for k, v in labels.items() if k in loaded}
     print(f"{df['meter_id'].nunique()} compteurs, {len(df):,} points")

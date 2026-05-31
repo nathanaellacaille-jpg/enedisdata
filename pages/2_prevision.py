@@ -59,8 +59,8 @@ def _render_perf_banner(metrics: dict) -> None:
                 "Modele": _MODEL_LABELS.get(name, name),
                 "MAE (kW)": round(m["mae_mean"], 3),
                 "RMSE (kW)": round(m.get("rmse_mean") or float("nan"), 3),
-                "Bat Reference": f"{v * 100:.0f}%" if v is not None else "—",
-                "Gain median": f"{g:+.1f}%" if g is not None else "—",
+                "Bat Reference": f"{v * 100:.0f}%" if v is not None else "-",
+                "Gain median": f"{g:+.1f}%" if g is not None else "-",
             })
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         st.caption(

@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-scripts/compute_nlinear_global_weights.py — Pre-calcule W_global pour NLinear (500 compteurs)
-
-Accumule XtX et XtY sur les 90 derniers jours de chaque compteur,
-resout W = (XtX + λI)^{-1} XtY et sauvegarde assets/nlinear_global_weights.npy.
-Usage : python scripts/compute_nlinear_global_weights.py
-"""
 import sys, time
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,7 +9,7 @@ L = 192
 STEPS = 48
 TRAIN_DAYS = 90
 RIDGE_LAMBDA = 1e-3
-PTS = TRAIN_DAYS * STEPS  # 4320
+PTS = TRAIN_DAYS * STEPS
 
 
 def main():
@@ -55,7 +47,7 @@ def main():
     print(f"  {n_ok} compteurs inclus  t={time.time()-t0:.1f}s", flush=True)
 
     print("Solve ridge...", flush=True)
-    W = np.linalg.solve(XtX + RIDGE_LAMBDA * np.eye(L), XtY)  # (L, STEPS)
+    W = np.linalg.solve(XtX + RIDGE_LAMBDA * np.eye(L), XtY)
 
     out = ROOT / "assets" / "nlinear_global_weights.npy"
     np.save(str(out), W)

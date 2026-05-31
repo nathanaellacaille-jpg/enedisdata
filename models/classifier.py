@@ -12,8 +12,6 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-# Hyperparams trouves par GridSearchCV (scripts/phase3_gridsearch.py)
-# sur 500 echantillons / 26 features, CV5, F1 weighted = 0.9454.
 _HGBT_PARAMS = dict(
     max_iter=400,
     learning_rate=0.08,
@@ -29,11 +27,6 @@ _HGBT_PARAMS = dict(
 
 
 def _make_stacking() -> StackingClassifier:
-    """Construit le stacking HistGBT + RF + LogReg avec meta LogReg.
-
-    Le meta-learner combine les probas des 3 modeles via une regression
-    logistique entrainee sur les predictions out-of-fold (CV5 interne).
-    """
     return StackingClassifier(
         estimators=[
             ("hgbt", HistGradientBoostingClassifier(**_HGBT_PARAMS)),
@@ -55,11 +48,6 @@ def _make_stacking() -> StackingClassifier:
 
 
 class EnergyClassifier:
-    """Pipeline StandardScaler -> Stacking(HistGBT + RF + LogReg) -> meta LogReg.
-
-    Le seuil decisionnel optimal est appris sur le train via PR curve (max F1)
-    et expose via self.threshold_ apres fit.
-    """
 
     def __init__(self):
         """Initialise le pipeline scaler + stacking."""
@@ -78,12 +66,6 @@ class EnergyClassifier:
         return self
 
     def _tune_threshold(self, X: pd.DataFrame, y: np.ndarray) -> float:
-        """Seuil F1-optimal sur les probas du train.
-
-        Le meta-learner du Stacking utilise deja des probas out-of-fold (cv=5 interne)
-        pour son entrainement, donc les probas predites sur le train sont peu biaisees.
-        On evite ainsi une CV5 supplementaire qui multiplie le compute par 5.
-        """
         proba = self._pipe.predict_proba(X)[:, 1]
         precisions, recalls, thresholds = precision_recall_curve(y, proba)
         f1s = 2 * precisions * recalls / (precisions + recalls + 1e-12)
@@ -99,12 +81,6 @@ class EnergyClassifier:
         return self._pipe.predict_proba(X)[:, 1]
 
     def feature_importances(self, X: pd.DataFrame, y: np.ndarray) -> pd.Series:
-        """Permutation importance sur l'espace original.
-
-        n_jobs=1 : eviter le multiprocessing qui copie le pipeline complet
-        dans chaque worker (~1 GB par copie avec le Stacking) → OOM sur Cloud.
-        Calcul one-shot via scripts/phase0_diagnostic.py.
-        """
         from sklearn.inspection import permutation_importance
         result = permutation_importance(
             self._pipe, X, y,

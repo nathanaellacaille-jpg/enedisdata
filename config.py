@@ -9,8 +9,6 @@ ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_TS_PATH = ROOT_DIR / "RES2-6-9.csv"
 DEFAULT_LBL_PATH = ROOT_DIR / "RES2-6-9-labels.csv"
 
-# URL de fallback : telechargee si DEFAULT_TS_PATH absent (Streamlit Cloud).
-# Surchargeable via variable d'environnement / secret Streamlit ENEDIS_TS_URL.
 DATA_URL_TS = os.environ.get(
     "ENEDIS_TS_URL",
     "https://github.com/nathanaellacaille-jpg/enedisdata/releases/download/data-v1/RES2-6-9.csv",
@@ -30,7 +28,6 @@ class Palette:
         "#0F172A", "#1E293B", "#334155", "#475569",
         "#64748B", "#94A3B8", "#CBD5E1", "#E2E8F0",
     ])
-    # Couleurs de traces (graphiques uniquement, jamais dans l'UI/CSS)
     ACCENT: List[str] = field(default_factory=lambda: [
         "#2563EB", "#F59E0B", "#10B981", "#DB2777", "#8B5CF6", "#0891B2",
     ])
@@ -42,17 +39,13 @@ STEPS_PER_DAY = 48
 
 CLF_TEST_SIZE = 0.30
 
-FCST_N_LAGS = 192          # 4 jours de lags (Phase 1 tuning : > 192 est marginal, < est sous-optimal)
-FCST_N_FOURIER = 6         # 6 harmoniques journalieres (audit reco #8, marginal sur prevision)
+FCST_N_LAGS = 192
+FCST_N_FOURIER = 6
 FCST_HORIZON_H = 24
 
 GEN_NOISE_STD = 0.15
-GEN_NOISE_RHO = 0.7  # autocorrélation AR(1) entre slots consécutifs
+GEN_NOISE_RHO = 0.7
 
-# Plafond de compteurs charges au demarrage. Defaut 150 : garde le cold-start
-# leger sur Streamlit Cloud (instance 1 Go) et evite les timeouts / courses
-# d'import declenches par le chargement des 500 compteurs. Le CSV etant trie par
-# compteur, les 150 premiers ont des series completes. none/all pour tout charger.
 _env_cap = os.environ.get("ENEDIS_MAX_METERS", "150")
 MAX_METERS_UPLOAD: int | None = None if _env_cap.lower() in ("none", "0", "all") else int(_env_cap)
 
@@ -61,8 +54,8 @@ def _make_rp_profile() -> np.ndarray:
     """Profil de reference RP normalise entre 0 et 1 (48 slots)."""
     t = np.arange(48)
     base = 0.18
-    matin = 0.45 * np.exp(-0.5 * ((t - 16) / 2.5) ** 2)   # pic 7h-9h  (slot 14-18)
-    soir = 0.60 * np.exp(-0.5 * ((t - 40) / 4.0) ** 2)    # pic 18h-22h (slot 36-44)
+    matin = 0.45 * np.exp(-0.5 * ((t - 16) / 2.5) ** 2)
+    soir = 0.60 * np.exp(-0.5 * ((t - 40) / 4.0) ** 2)
     profile = base + matin + soir
     return profile / profile.max()
 
@@ -71,6 +64,6 @@ def _make_rs_profile() -> np.ndarray:
     """Profil de reference RS normalise entre 0 et 1 (48 slots)."""
     t = np.arange(48)
     base = 0.06
-    soir = 0.35 * np.exp(-0.5 * ((t - 40) / 3.0) ** 2)    # pic 20h (slot 40)
+    soir = 0.35 * np.exp(-0.5 * ((t - 40) / 3.0) ** 2)
     profile = base + soir
     return profile / profile.max()

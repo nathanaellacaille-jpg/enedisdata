@@ -20,12 +20,6 @@ def _load_baseline_inner(path_str: str, mtime: float, size: int) -> dict | None:
 
 
 def _load_baseline_metrics() -> dict | None:
-    """Charge les metriques baseline (CV5 pre-calcule par scripts/phase0_diagnostic.py).
-
-    Pass mtime+size en argument pour invalider le cache automatiquement
-    quand le fichier change sur Cloud (sans ca, le cache @st.cache_data garde
-    l'ancien JSON en memoire apres un deploy).
-    """
     p = ROOT_DIR / "assets" / "baseline_metrics.json"
     if not p.exists():
         return None
@@ -61,8 +55,6 @@ _FEAT_LABELS = {
     "vacation_weeks": "Vacances longues (sem.)",
 }
 
-
-# ── helpers ──────────────────────────────────────────────────────────────────
 
 def _plotly_base() -> dict:
     """Retourne le layout de base pour les graphiques Plotly."""
@@ -112,8 +104,6 @@ def _train_model(features: pd.DataFrame, labels: dict):
     return clf
 
 
-# ── sidebar ───────────────────────────────────────────────────────────────────
-
 with st.sidebar:
     st.markdown("**Donnees**")
     df = load_default_ts()
@@ -130,13 +120,8 @@ with st.sidebar:
     else:
         selected = None
 
-    # Slider seuil decision : defaut = seuil PR-optimal CV5 du JSON baseline.
-    # Plus bas → plus de RS detectees (rappel ↑, precision ↓).
     _baseline_for_threshold = _load_baseline_metrics()
     if _baseline_for_threshold is not None:
-        # Defaut = seuil "balanced" (max moyenne recall_RP + recall_RS),
-        # typiquement proche de 0.5. Plus equitable que le PR-F1-optimal qui
-        # favorise la classe majoritaire.
         _default_thr = float(
             _baseline_for_threshold["cv5"].get("threshold_balanced")
             or _baseline_for_threshold["cv5"].get("threshold_pr_optimal", 0.5)
@@ -160,7 +145,6 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-# ── main ─────────────────────────────────────────────────────────────────────
 
 st.markdown("## Classification")
 
@@ -168,36 +152,29 @@ if df is None:
     st.caption("Jeu de donnees indisponible.")
     st.stop()
 
-# Features globales
 features = _compute_features(df)
 
-# Labels + modele
 labels = st.session_state.get("_labels")
 clf = None
 if labels is not None:
     clf = _train_model(features, labels)
-    # Surcharge le seuil par celui du slider sidebar (defaut = PR-optimal CV5).
     if clf is not None and threshold_override is not None:
         clf.threshold_ = threshold_override
 
-# Predictions sur tout le dataset
 if clf is not None:
     proba_series = _predict_all(features, labels)
 else:
     proba_series = pd.Series(index=features.index, dtype=float)
 
-# Donnees du compteur selectionne
 meter_df = df[df["meter_id"] == selected].sort_values("ts")
 meter_feat = features.loc[[selected]] if selected in features.index else pd.DataFrame()
 
-# Metriques du compteur
 daily = meter_df.groupby(meter_df["ts"].dt.date)["kw"].sum() * 0.5
 mean_conso = daily.mean() if not daily.empty else 0.0
 peak_kw = meter_df["kw"].max()
 we_wd = meter_feat["ratio_we_wd"].iloc[0] if not meter_feat.empty else 0.0
 energy_j = mean_conso
 
-# ── Performance globale (bloc top, KPI globaux) ───────────────────────────────
 
 if clf is not None:
     st.markdown("### Performance globale du modele")
@@ -272,7 +249,6 @@ if clf is not None:
 
     st.markdown("---")
 
-# ── Detail compteur selectionne ───────────────────────────────────────────────
 
 st.markdown(f"### Compteur {selected}")
 
@@ -282,7 +258,6 @@ c2.metric("Pic (kW)", f"{peak_kw:.2f}", delta_color="off")
 c3.metric("Ratio WE/SD", f"{we_wd:.2f}", delta_color="off")
 c4.metric("Energie/j (kWh)", f"{energy_j:.1f}", delta_color="off")
 
-# Verdict de classification : metric simple + progress bar (plus leger que gauge Plotly)
 if not proba_series.empty and selected in proba_series.index:
     proba_rs = float(proba_series[selected])
     threshold = clf.threshold_ if clf is not None else 0.5
@@ -303,8 +278,6 @@ if not proba_series.empty and selected in proba_series.index:
 else:
     st.caption("Chargez des labels pour obtenir la classification.")
 
-# Timeline d'occupation : visualise les VRAIS signaux qui discriminent RS/RP
-# (absences, jours actifs, ratio saisonnier).
 if not meter_df.empty:
     st.markdown("---")
     st.markdown("### Timeline d'occupation")
@@ -313,12 +286,10 @@ if not meter_df.empty:
     _daily.index = pd.to_datetime(_daily.index)
     _daily = _daily.sort_index()
 
-    # Seuil d'absence : 0.5 kWh/jour (meme valeur que dans features.py)
     _absent = _daily < 0.5
     _active_pct = float((~_absent).mean() * 100) if len(_daily) > 0 else 0.0
     _n_absent = int(_absent.sum())
 
-    # Detection longue absence consecutive (max gap days)
     _max_gap = 0
     _cur = 0
     _gap_end_idx = -1
@@ -333,13 +304,11 @@ if not meter_df.empty:
     _max_gap_start_date = _daily.index[_gap_end_idx - _max_gap + 1] if _gap_end_idx >= 0 and _max_gap > 0 else None
     _max_gap_end_date = _daily.index[_gap_end_idx] if _gap_end_idx >= 0 else None
 
-    # KPI compacts au-dessus du graphique
     k1, k2, k3 = st.columns(3)
     k1.metric("Jours actifs", f"{_active_pct:.0f} %", delta_color="off")
     k2.metric("Jours absents", str(_n_absent), delta_color="off")
     k3.metric("Plus longue absence", f"{_max_gap} j", delta_color="off")
 
-    # Bar chart par jour : couleur differente actif vs absent
     colors = [PAL.ACCENT[0] if not a else "#E2E8F0" for a in _absent.values]
     fig_tl = go.Figure(go.Bar(
         x=_daily.index, y=_daily.values,
@@ -347,7 +316,6 @@ if not meter_df.empty:
         hovertemplate="%{x|%d %b %Y} : %{y:.1f} kWh<extra></extra>",
     ))
     if _max_gap_start_date is not None and _max_gap >= 7:
-        # Highlight bandeau pour les longues absences (>= 1 semaine)
         fig_tl.add_vrect(
             x0=_max_gap_start_date, x1=_max_gap_end_date,
             fillcolor="#FCA5A5", opacity=0.15, layer="below", line_width=0,
@@ -386,5 +354,3 @@ if clf is not None and not meter_feat.empty:
         ))
         fig_imp.update_layout(**_plotly_base(), margin=dict(l=16, r=16, t=32, b=16), title="Facteurs les plus determinants", xaxis_title="Importance (permutation)")
         st.plotly_chart(fig_imp, width="stretch")
-
-# (La section Performance globale a ete deplacee en haut de page.)

@@ -8,8 +8,6 @@ from models.generator import CurveGenerator
 from utils.data_loader import load_default_ts, load_default_labels
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
 def _plotly_base() -> dict:
     """Layout Plotly minimal partage par tous les graphiques."""
     return dict(
@@ -85,8 +83,6 @@ def _sample_real_curves(
     return result[["curve_id", "day", "slot", "kw", "curve_type"]]
 
 
-# ── sidebar ───────────────────────────────────────────────────────────────────
-
 with st.sidebar:
     st.markdown("**Calibration**")
     real_df = load_default_ts()
@@ -103,31 +99,23 @@ with st.sidebar:
     )
 
 
-# ── page ──────────────────────────────────────────────────────────────────────
-
 st.markdown("## Generation")
 
 if real_df is None or labels is None:
     st.stop()
 
-st.caption(f"Calibre sur {real_df['meter_id'].nunique()} compteurs reels — {len(real_df):,} points")
+st.caption(f"Calibre sur {real_df['meter_id'].nunique()} compteurs reels - {len(real_df):,} points")
 
 ts_key = "default_ts"
 lbl_key = "default_lbl"
 
 
-# ── controles ─────────────────────────────────────────────────────────────────
-
 curve_type = st.radio("Type", ["RS", "RP"], horizontal=True, key="gen_type")
 
 N_DAYS = 7
-# 300 courbes pour le report (distributions stables, faible variance d'echantillonnage) ;
-# le graphique principal n'affiche que 50 vraies courbes (main_df).
 gen_df = _generate(ts_key, lbl_key, 300, curve_type, N_DAYS, real_df, labels, "bootstrap")
 main_df = _sample_real_curves(ts_key, lbl_key, real_df, labels, curve_type, 50, N_DAYS)
 
-
-# ── graphique principal : N courbes sur 7 jours ──────────────────────────────
 
 main_df_sorted = main_df.sort_values(["curve_id", "day", "slot"]).copy()
 main_df_sorted["t"] = main_df_sorted["day"] * STEPS_PER_DAY + main_df_sorted["slot"]
@@ -163,8 +151,6 @@ fig_main.update_layout(
 fig_main.update_xaxes(tickmode="array", tickvals=day_ticks, ticktext=day_labels)
 st.plotly_chart(fig_main, width="stretch")
 
-
-# ── validation : similarite ──────────────────────────────────────────────────
 
 st.markdown("### Qualite de generation")
 
@@ -235,8 +221,6 @@ else:
         st.plotly_chart(fig_b, width="stretch")
         st.metric("Ecart energetique moyen", f"{report['wasserstein_energy']:.2f} kWh", delta_color="off")
 
-
-# ── KPIs coherence globale ────────────────────────────────────────────────────
 
 st.markdown("### Coherence globale")
 

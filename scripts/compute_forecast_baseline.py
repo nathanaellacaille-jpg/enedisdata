@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""Recalcule assets/forecast_baseline_metrics.json (bandeau Performance globale).
-
-Backtest rolling par compteur : Ridge, NLinear, naive_last_day vs naive_weekly (J-7)
-sur N_PER_CLASS RS + N_PER_CLASS RP. LightGBM evalue sur un sous-ensemble reduit
-(cout eleve : 48 modeles par fit). Usage : python scripts/compute_forecast_baseline.py
-"""
 import json
 import sys
 import time
@@ -86,7 +79,6 @@ def main():
     selected = set(sel_rs) | set(sel_rp)
     print(f"  selection : {len(sel_rs)} RS + {len(sel_rp)} RP", flush=True)
 
-    # series par compteur en une seule passe groupby
     series_by = {}
     for mid, g in df.groupby("meter_id", observed=True):
         m = str(mid)
@@ -97,7 +89,7 @@ def main():
     maes = {k: [] for k in models}
     rmses = {k: [] for k in models}
     per_h = {k: {"sum": np.zeros(HORIZON), "cnt": np.zeros(HORIZON)} for k in models}
-    weekly_mae = []          # par evaluation, aligne avec l'ordre des evals
+    weekly_mae = []
     eval_mae = {k: [] for k in models}
 
     print("Backtest Ridge / NLinear / naive...", flush=True)
@@ -134,7 +126,6 @@ def main():
             "median_gain_pct": float(np.median(gains)),
         }
 
-    # LightGBM sur sous-ensemble reduit (cout eleve)
     print("Backtest LightGBM (sous-ensemble)...", flush=True)
     t0 = time.time()
     lgbm_meters = sel_rp[:LGBM_METERS]
