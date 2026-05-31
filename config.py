@@ -46,7 +46,7 @@ FCST_HORIZON_H = 24
 GEN_NOISE_STD = 0.15
 GEN_NOISE_RHO = 0.7
 
-_env_cap = os.environ.get("ENEDIS_MAX_METERS", "150")
+_env_cap = os.environ.get("ENEDIS_MAX_METERS", "500")
 MAX_METERS_UPLOAD: int | None = None if _env_cap.lower() in ("none", "0", "all") else int(_env_cap)
 
 
